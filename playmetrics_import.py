@@ -61,6 +61,7 @@ import re
 import csv
 import sys
 import glob
+import argparse
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, List, Dict, Any, Tuple
@@ -469,6 +470,20 @@ def print_stats(stats: Dict, bc_verified: List, non_verified: List):
 
 
 def main():
+    # ── Parse command-line arguments ──
+    parser = argparse.ArgumentParser(
+        description="AYSO PlayMetrics Player Import Tool",
+        epilog="Example: playmetrics_import.py --dir C:\\Users\\sdavis\\sa_reports",
+    )
+    parser.add_argument(
+        "--dir",
+        metavar="FOLDER",
+        help="Folder containing SA report files. Auto-loads all "
+        "playerUpload*.xlsx and Player*Photo*BC*.xlsx files "
+        "found, merging multiple seasons automatically.",
+    )
+    args = parser.parse_args()
+
     print()
     print("╔══════════════════════════════════════════════════════╗")
     print("║  AYSO PlayMetrics Player Import Tool                ║")
@@ -476,97 +491,159 @@ def main():
     print("╚══════════════════════════════════════════════════════╝")
     print()
 
-    # ── Step 1: Locate files ──
-    print("STEP 1: Locate source files")
-    print("─" * 40)
-
-    # Try auto-detection first
-    upload_file = find_file("playerUpload*.xlsx") or find_file(
-        "PlayerDetail*upload*.xlsx"
-    )
-    bc_file = find_file("Player_Photo_BC*.xlsx") or find_file("PlayerPhotoBC*.xlsx")
-
-    if upload_file:
-        print(f"  Found player upload: {upload_file}")
-        resp = input(f"  Use this file? (Y/n): ").strip().lower()
-        if resp == "n":
-            upload_file = None
-
-    if not upload_file:
-        upload_file = (
-            input("  Path to 'Player Detail | upload format' Excel file: ")
-            .strip()
-            .strip('"')
-        )
-        if not os.path.exists(upload_file):
-            print(f"  ERROR: File not found: {upload_file}")
+    if args.dir:
+        # ── Batch mode: auto-load everything from the specified folder ──
+        folder = args.dir.strip().strip('"')
+        if not os.path.isdir(folder):
+            print(f"  ERROR: Folder not found: {folder}")
             sys.exit(1)
 
-    if bc_file:
-        print(f"  Found BC info: {bc_file}")
-        resp = input(f"  Use this file? (Y/n): ").strip().lower()
-        if resp == "n":
-            bc_file = None
+        print(f"  Scanning folder: {folder}")
+        print("─" * 40)
 
-    if not bc_file:
+        # Find all matching files
+        upload_files = sorted(glob.glob(os.path.join(folder, "playerUpload*.xlsx")))
+        if not upload_files:
+            upload_files = sorted(
+                glob.glob(os.path.join(folder, "PlayerDetail*upload*.xlsx"))
+            )
+
+        bc_files = sorted(glob.glob(os.path.join(folder, "Player_Photo_BC*.xlsx")))
+        if not bc_files:
+            bc_files = sorted(glob.glob(os.path.join(folder, "Player Photo BC*.xlsx")))
+        if not bc_files:
+            bc_files = sorted(glob.glob(os.path.join(folder, "PlayerPhotoBC*.xlsx")))
+
+        if not upload_files:
+            print("  ERROR: No playerUpload*.xlsx files found in folder")
+            sys.exit(1)
+
+        print(f"  Found {len(upload_files)} player upload file(s):")
+        for f in upload_files:
+            print(f"    • {os.path.basename(f)}")
+
+        if bc_files:
+            print(f"  Found {len(bc_files)} BC info file(s):")
+            for f in bc_files:
+                print(f"    • {os.path.basename(f)}")
+        else:
+            print(
+                "  ⚠️  No Player_Photo_BC*.xlsx files found — all players will be non-verified"
+            )
+
+        print()
+
+        # Load all files
+        print("  Loading data...")
+        print("─" * 40)
+        upload_dfs = [load_player_upload(f) for f in upload_files]
+        bc_dfs = [load_bc_info(f) for f in bc_files]
+
+    else:
+        # ── Interactive mode: prompt for files ──
+        print("  Tip: Use --dir <folder> to auto-load all files from a folder")
+        print()
+
+        # ── Step 1: Locate files ──
+        print("STEP 1: Locate source files")
+        print("─" * 40)
+
+        # Try auto-detection first
+        upload_file = find_file("playerUpload*.xlsx") or find_file(
+            "PlayerDetail*upload*.xlsx"
+        )
         bc_file = (
-            input("  Path to 'Player Photo BC Info' Excel file (or Enter to skip): ")
-            .strip()
-            .strip('"')
+            find_file("Player_Photo_BC*.xlsx")
+            or find_file("Player Photo BC*.xlsx")
+            or find_file("PlayerPhotoBC*.xlsx")
         )
-        if bc_file and not os.path.exists(bc_file):
-            print(f"  ERROR: File not found: {bc_file}")
-            bc_file = None
 
-    print()
+        if upload_file:
+            print(f"  Found player upload: {upload_file}")
+            resp = input(f"  Use this file? (Y/n): ").strip().lower()
+            if resp == "n":
+                upload_file = None
 
-    # ── Step 2: Multi-season? ──
-    print("STEP 2: Additional seasons (optional)")
-    print("─" * 40)
-    print("  If you downloaded reports for prior years, you can include them")
-    print("  to capture returning players. The tool will deduplicate and keep")
-    print("  the most recent contact info.")
-    print()
-
-    additional_uploads = []
-    additional_bc = []
-
-    while True:
-        resp = (
-            input("  Add another season's playerUpload file? (y/N): ").strip().lower()
-        )
-        if resp != "y":
-            break
-        extra = input("  Path to additional playerUpload file: ").strip().strip('"')
-        if os.path.exists(extra):
-            additional_uploads.append(extra)
-            extra_bc = (
-                input("  Corresponding Player Photo BC Info file (or Enter to skip): ")
+        if not upload_file:
+            upload_file = (
+                input("  Path to 'Player Detail | upload format' Excel file: ")
                 .strip()
                 .strip('"')
             )
-            if extra_bc and os.path.exists(extra_bc):
-                additional_bc.append(extra_bc)
-        else:
-            print(f"  File not found: {extra}")
+            if not os.path.exists(upload_file):
+                print(f"  ERROR: File not found: {upload_file}")
+                sys.exit(1)
 
-    print()
+        if bc_file:
+            print(f"  Found BC info: {bc_file}")
+            resp = input(f"  Use this file? (Y/n): ").strip().lower()
+            if resp == "n":
+                bc_file = None
 
-    # ── Step 3: Load and process ──
-    print("STEP 3: Loading data")
-    print("─" * 40)
-    print("─" * 40)
+        if not bc_file:
+            bc_file = (
+                input(
+                    "  Path to 'Player Photo BC Info' Excel file (or Enter to skip): "
+                )
+                .strip()
+                .strip('"')
+            )
+            if bc_file and not os.path.exists(bc_file):
+                print(f"  ERROR: File not found: {bc_file}")
+                bc_file = None
 
-    # Load primary files
-    upload_dfs = [load_player_upload(upload_file)]
-    for extra in additional_uploads:
-        upload_dfs.append(load_player_upload(extra))
+        print()
 
-    bc_dfs = []
-    if bc_file:
-        bc_dfs.append(load_bc_info(bc_file))
-    for extra in additional_bc:
-        bc_dfs.append(load_bc_info(extra))
+        # ── Step 2: Multi-season? ──
+        print("STEP 2: Additional seasons (optional)")
+        print("─" * 40)
+        print("  If you downloaded reports for prior years, you can include them")
+        print("  to capture returning players. The tool will deduplicate and keep")
+        print("  the most recent contact info.")
+        print()
+
+        additional_uploads = []
+        additional_bc = []
+
+        while True:
+            resp = (
+                input("  Add another season's playerUpload file? (y/N): ")
+                .strip()
+                .lower()
+            )
+            if resp != "y":
+                break
+            extra = input("  Path to additional playerUpload file: ").strip().strip('"')
+            if os.path.exists(extra):
+                additional_uploads.append(extra)
+                extra_bc = (
+                    input(
+                        "  Corresponding Player Photo BC Info file (or Enter to skip): "
+                    )
+                    .strip()
+                    .strip('"')
+                )
+                if extra_bc and os.path.exists(extra_bc):
+                    additional_bc.append(extra_bc)
+            else:
+                print(f"  File not found: {extra}")
+
+        print()
+
+        # Load files
+        print("  Loading data...")
+        print("─" * 40)
+        upload_dfs = [load_player_upload(upload_file)]
+        for extra in additional_uploads:
+            upload_dfs.append(load_player_upload(extra))
+
+        bc_dfs = []
+        if bc_file:
+            bc_dfs.append(load_bc_info(bc_file))
+        for extra in additional_bc:
+            bc_dfs.append(load_bc_info(extra))
+
+    # ── Common processing (both modes) ──
 
     # Merge seasons if needed
     if len(upload_dfs) > 1:
@@ -606,16 +683,16 @@ def main():
 
     print()
 
-    # ── Step 5: Build import files ──
-    print("STEP 4: Building PlayMetrics import files")
+    # ── Build import files ──
+    print("  Building PlayMetrics import files...")
     print("─" * 40)
 
     bc_verified, non_verified, stats = build_import_data(player_data, bc_data)
 
     print_stats(stats, bc_verified, non_verified)
 
-    # ── Step 6: Write output ──
-    print("STEP 5: Writing CSV files")
+    # ── Write output ──
+    print("  Writing CSV files...")
     print("─" * 40)
 
     timestamp = datetime.now().strftime("%Y%m%d")
