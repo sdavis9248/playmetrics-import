@@ -17,21 +17,34 @@ REQUIRED INPUT FILES:
     1. "Player Detail | upload format" from Sports Affinity (playerUpload.xlsx)
        - This is your PRIMARY data source — has player names, DOB, gender,
          parent contacts, addresses, and team assignments.
+       - Found under: Players/Admins → Player Lookup → Report dropdown
 
-    2. "All Player Applications Detail" from Sports Affinity (playerApplications.xlsx)
-       - Used to determine birth certificate status via the "Media" column.
-       - Media=B means a birth certificate was used for age verification.
+    2. "Player Photo BC Info" from Sports Affinity (Player_Photo_BC_Info.xlsx)
+       - Shows birth certificate upload dates and verification dates per player.
+       - Players with a BC Uploaded date OR a BC Verified date have a BC on file.
+       - Found under: Reports → Player Photo BC Info
 
 HOW TO DOWNLOAD THE REPORTS:
+    Report 1 — "Player Detail | upload format":
     1. Log in to Sports Connect → click "Change Login" → select the Association site
     2. Navigate to Players/Admins → Player Lookup
     3. Set the season dropdown (e.g., "2025-2026 MY2025")
     4. Set Region to your region
     5. Set Age Group to "Multiple" (select all)
     6. From the Report dropdown, select "Player Detail | upload format" → Print
-    7. Save the Excel file
-    8. Repeat with "All Player Applications Detail" → Print → Save
-    9. For multi-year imports: change the season dropdown and repeat for each year
+    7. In the report viewer, select "Excel" format → Export
+    8. Save the file (downloads as playerUpload.xlsx)
+
+    Report 2 — "Player Photo BC Info":
+    1. In Sports Affinity, navigate to Reports (top menu)
+    2. From the report dropdown, select "Player Photo BC Info"
+    3. Set Area and Region filters
+    4. Leave Date Range blank (gets all players)
+    5. Click "Generate Report"
+    6. In the report viewer, select "Excel" format → Export
+    7. Save the file (downloads as Player_Photo_BC_Info.xlsx)
+
+    For multi-year imports: change the season/date range and repeat for each year
 
 OUTPUT:
     Two CSV files ready for PlayMetrics:
@@ -140,37 +153,53 @@ def load_player_upload(filepath: str) -> pd.DataFrame:
     return df
 
 
-def load_player_applications(filepath: str) -> pd.DataFrame:
+def load_bc_info(filepath: str) -> pd.DataFrame:
     """
-    Load the "All Player Applications Detail" report from Sports Affinity.
+    Load the "Player Photo BC Info" report from Sports Affinity.
 
-    Used to extract birth certificate status from the "Media" column.
-    Media=B means a birth certificate was used for age verification.
+    This report has per-player birth certificate status:
+    - Birth Certificate Uploaded (date) — file was uploaded
+    - Birth Certificate Verified (date) — someone reviewed and verified it
+
+    If either date is present, the player has a BC on file.
     """
-    print(f"  Loading player applications: {filepath}")
-    df = pd.read_excel(filepath)
-    print(f"  → {len(df)} application records loaded")
+    print(f"  Loading BC info: {filepath}")
+    df = pd.read_excel(filepath, header=1)
+    print(f"  → {len(df)} players loaded")
 
-    if "Media" not in df.columns:
-        print(f"  ⚠️  'Media' column not found — cannot determine BC status")
-        print(f"  Available columns: {list(df.columns)}")
-        return pd.DataFrame()
+    # Standardize column names (report has long names)
+    col_map = {}
+    for c in df.columns:
+        cl = str(c).strip().lower()
+        if cl == "first name":
+            col_map[c] = "First Name"
+        elif cl == "last name":
+            col_map[c] = "Last Name"
+        elif cl == "dob":
+            col_map[c] = "DOB"
+        elif cl == "birth certificate uploaded":
+            col_map[c] = "BC_Uploaded"
+        elif cl == "birth certificate verified by district/state":
+            col_map[c] = "BC_Verified_District"
+        elif cl == "birth certificate verified by league/club":
+            col_map[c] = "BC_Verified_League"
+        elif cl == "birth certificate verified by":
+            col_map[c] = "BC_Verified_By"
+        elif cl == "birth certificate verified":
+            col_map[c] = "BC_Verified"
+    df.rename(columns=col_map, inplace=True)
 
-    # Deduplicate to one record per player (most recent application)
-    if "Appl. Date" in df.columns:
-        df = df.sort_values("Appl. Date", ascending=False)
+    # Count BC statuses
+    has_uploaded = df["BC_Uploaded"].notna().sum() if "BC_Uploaded" in df.columns else 0
+    has_verified = df["BC_Verified"].notna().sum() if "BC_Verified" in df.columns else 0
+    has_either = (
+        (df.get("BC_Uploaded", pd.Series(dtype="object")).notna())
+        | (df.get("BC_Verified", pd.Series(dtype="object")).notna())
+    ).sum()
+    has_neither = len(df) - has_either
 
-    df["_key"] = (
-        df["First Name"].str.strip().str.lower()
-        + "|"
-        + df["Last Name"].str.strip().str.lower()
-        + "|"
-        + df["DOB"].astype(str)
-    )
-    df = df.drop_duplicates(subset="_key", keep="first")
-
-    bc_count = (df["Media"].str.upper().str.startswith("B", na=False)).sum()
-    print(f"  → {len(df)} unique players, {bc_count} with BC on file (Media=B)")
+    print(f"  → BC Verified: {has_verified}, BC Uploaded: {has_uploaded}")
+    print(f"  → Total with BC on file: {has_either}, No BC: {has_neither}")
 
     return df
 
@@ -272,12 +301,14 @@ def build_import_data(
         "missing_dob": 0,
     }
 
-    # Build BC lookup from applications
+    # Build BC lookup from BC Info report
     bc_lookup = set()
-    if not player_apps.empty and "Media" in player_apps.columns:
+    if not player_apps.empty:
         for _, row in player_apps.iterrows():
-            media = safe_str(row.get("Media", "")).upper()
-            if media.startswith("B"):
+            bc_uploaded = row.get("BC_Uploaded")
+            bc_verified = row.get("BC_Verified")
+            has_bc = pd.notna(bc_uploaded) or pd.notna(bc_verified)
+            if has_bc:
                 key = (
                     safe_str(row.get("First Name", "")).lower()
                     + "|"
@@ -453,9 +484,7 @@ def main():
     upload_file = find_file("playerUpload*.xlsx") or find_file(
         "PlayerDetail*upload*.xlsx"
     )
-    apps_file = find_file("playerApplication*.xlsx") or find_file(
-        "AllPlayerApplications*.xlsx"
-    )
+    bc_file = find_file("Player_Photo_BC*.xlsx") or find_file("PlayerPhotoBC*.xlsx")
 
     if upload_file:
         print(f"  Found player upload: {upload_file}")
@@ -473,23 +502,21 @@ def main():
             print(f"  ERROR: File not found: {upload_file}")
             sys.exit(1)
 
-    if apps_file:
-        print(f"  Found player applications: {apps_file}")
+    if bc_file:
+        print(f"  Found BC info: {bc_file}")
         resp = input(f"  Use this file? (Y/n): ").strip().lower()
         if resp == "n":
-            apps_file = None
+            bc_file = None
 
-    if not apps_file:
-        apps_file = (
-            input(
-                "  Path to 'All Player Applications Detail' Excel file (or Enter to skip): "
-            )
+    if not bc_file:
+        bc_file = (
+            input("  Path to 'Player Photo BC Info' Excel file (or Enter to skip): ")
             .strip()
             .strip('"')
         )
-        if apps_file and not os.path.exists(apps_file):
-            print(f"  ERROR: File not found: {apps_file}")
-            apps_file = None
+        if bc_file and not os.path.exists(bc_file):
+            print(f"  ERROR: File not found: {bc_file}")
+            bc_file = None
 
     print()
 
@@ -502,7 +529,7 @@ def main():
     print()
 
     additional_uploads = []
-    additional_apps = []
+    additional_bc = []
 
     while True:
         resp = (
@@ -513,13 +540,13 @@ def main():
         extra = input("  Path to additional playerUpload file: ").strip().strip('"')
         if os.path.exists(extra):
             additional_uploads.append(extra)
-            extra_apps = (
-                input("  Corresponding playerApplications file (or Enter to skip): ")
+            extra_bc = (
+                input("  Corresponding Player Photo BC Info file (or Enter to skip): ")
                 .strip()
                 .strip('"')
             )
-            if extra_apps and os.path.exists(extra_apps):
-                additional_apps.append(extra_apps)
+            if extra_bc and os.path.exists(extra_bc):
+                additional_bc.append(extra_bc)
         else:
             print(f"  File not found: {extra}")
 
@@ -535,11 +562,11 @@ def main():
     for extra in additional_uploads:
         upload_dfs.append(load_player_upload(extra))
 
-    apps_dfs = []
-    if apps_file:
-        apps_dfs.append(load_player_applications(apps_file))
-    for extra in additional_apps:
-        apps_dfs.append(load_player_applications(extra))
+    bc_dfs = []
+    if bc_file:
+        bc_dfs.append(load_bc_info(bc_file))
+    for extra in additional_bc:
+        bc_dfs.append(load_bc_info(extra))
 
     # Merge seasons if needed
     if len(upload_dfs) > 1:
@@ -549,25 +576,33 @@ def main():
     else:
         player_data = upload_dfs[0]
 
-    # Merge application data
-    if apps_dfs:
-        if len(apps_dfs) > 1:
-            apps_data = pd.concat(apps_dfs, ignore_index=True)
-            # Deduplicate applications across seasons
-            apps_data["_key"] = (
-                apps_data["First Name"].str.strip().str.lower()
+    # Merge BC info data
+    if bc_dfs:
+        if len(bc_dfs) > 1:
+            bc_data = pd.concat(bc_dfs, ignore_index=True)
+            # Deduplicate — keep record with most BC info
+            bc_data["_key"] = (
+                bc_data["First Name"].str.strip().str.lower()
                 + "|"
-                + apps_data["Last Name"].str.strip().str.lower()
+                + bc_data["Last Name"].str.strip().str.lower()
                 + "|"
-                + apps_data["DOB"].astype(str)
+                + bc_data["DOB"].astype(str)
             )
-            if "Appl. Date" in apps_data.columns:
-                apps_data = apps_data.sort_values("Appl. Date", ascending=False)
-            apps_data = apps_data.drop_duplicates(subset="_key", keep="first")
+            # Prefer records that have BC_Verified, then BC_Uploaded
+            bc_data["_has_verified"] = bc_data.get(
+                "BC_Verified", pd.Series(dtype="object")
+            ).notna()
+            bc_data["_has_uploaded"] = bc_data.get(
+                "BC_Uploaded", pd.Series(dtype="object")
+            ).notna()
+            bc_data = bc_data.sort_values(
+                ["_has_verified", "_has_uploaded"], ascending=False
+            )
+            bc_data = bc_data.drop_duplicates(subset="_key", keep="first")
         else:
-            apps_data = apps_dfs[0]
+            bc_data = bc_dfs[0]
     else:
-        apps_data = pd.DataFrame()
+        bc_data = pd.DataFrame()
 
     print()
 
@@ -575,7 +610,7 @@ def main():
     print("STEP 4: Building PlayMetrics import files")
     print("─" * 40)
 
-    bc_verified, non_verified, stats = build_import_data(player_data, apps_data)
+    bc_verified, non_verified, stats = build_import_data(player_data, bc_data)
 
     print_stats(stats, bc_verified, non_verified)
 
