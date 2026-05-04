@@ -98,7 +98,7 @@ To capture returning players from prior years, change the **Season dropdown** to
 | `city` | `City` | — |
 | `state` | `State` | — |
 | `zip` | `ZIPCode` | Truncated from ZIP+4 to 5 digits |
-| `team` | `TeamName` | Cleared for Jamboree teams |
+| `team` | — | Always blank — prior season teams don't exist in PM |
 
 ## Important Notes
 
@@ -106,7 +106,7 @@ To capture returning players from prior years, change the **Season dropdown** to
 
 - **Birth certificate status** uses the `Media` column from the Applications report. `Media=B` means a BC was used for age verification. We treat "BC on file" as verified regardless of whether someone manually clicked a verify button in SportsConnect.
 
-- **Jamboree/4U players** are included with their team name cleared. They may age up to 5U and should keep their BC verification status.
+- **Jamboree/4U players** are included in the import. They may age up to 5U and should keep their BC verification status. Like all imported players, their team column is blank since prior season teams don't carry over.
 
 - **Aged-out players** (born before Aug 1, 2007 for Fall 2026) are automatically excluded. Adjust `OLDEST_ELIGIBLE_DOB` in the script for different seasons.
 

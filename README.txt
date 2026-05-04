@@ -200,10 +200,11 @@
   the number of returning families who don't have to re-upload.
 
   ABOUT JAMBOREE/4U PLAYERS:
-  Players on Jamboree teams (typically 4U) are included in the import with
-  their team name cleared. They may be aging up to 5U and should keep
-  their BC verification status. They won't be assigned to a team in PM
-  but their BC status carries over.
+  Players on Jamboree teams (typically 4U) are included in the import.
+  They may be aging up to 5U and should keep their BC verification
+  status. Like all imported players, the team column is blank — prior
+  season teams don't carry over to PlayMetrics. Teams are built fresh
+  after registration and draft.
 
   ABOUT AGED-OUT PLAYERS:
   Players born before August 1, 2007 are automatically excluded (they're

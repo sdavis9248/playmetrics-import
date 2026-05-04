@@ -230,7 +230,6 @@ def build_import_data(player_upload: pd.DataFrame,
     stats = {
         'total_input': len(player_upload),
         'aged_out': 0,
-        'jamboree_cleared': 0,
         'bc_verified': 0,
         'non_verified': 0,
         'missing_email': 0,
@@ -274,22 +273,16 @@ def build_import_data(player_upload: pd.DataFrame,
             except Exception:
                 pass
         
-        # Jamboree teams: keep the player but clear team name
-        # (Jamboree = 4U program that won't exist in PM, but the player
-        # may be aging up to 5U and should keep their BC verification)
-        team_name = safe_str(record.get('TeamName'))
-        if team_name and 'jamboree' in team_name.lower():
-            team_name = ''
-            stats['jamboree_cleared'] += 1
-        
         # Check parent email
         parent1_email = safe_str(record.get('FatherEmailAddress'))
         if not parent1_email:
             stats['missing_email'] += 1
         
         # Build the PM row
+        # Team is always blank — SA data has prior season teams that don't
+        # exist in PM. Teams get built fresh after registration and draft.
         row = {
-            'team': team_name if team_name.upper() != 'UNALLOCATED' else '',
+            'team': '',
             'season_id': '',
             'season': season_name,
             'player_first_name': first,
@@ -381,8 +374,6 @@ def print_stats(stats: Dict, bc_verified: List, non_verified: List):
     print(f"  Total players in source file:    {stats['total_input']}")
     if stats['aged_out']:
         print(f"  Removed (aged out):              {stats['aged_out']}")
-    if stats['jamboree_cleared']:
-        print(f"  Jamboree (team name cleared):     {stats['jamboree_cleared']}")
     if stats['missing_dob']:
         print(f"  Skipped (no DOB):                {stats['missing_dob']}")
     if stats['missing_email']:
