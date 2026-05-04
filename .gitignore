@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+*.spec
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Output
+playmetrics_output/
+
+# Data files (don't commit real player data)
+*.xlsx
+*.csv
+
+# OS
+.DS_Store
+Thumbs.db
