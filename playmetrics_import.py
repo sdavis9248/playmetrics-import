@@ -293,16 +293,20 @@ def build_import_data(
     player_apps: pd.DataFrame,
     season_name: str = "",
     exclude_aged_out: bool = True,
-) -> Tuple[List[Dict], List[Dict], Dict]:
+    bc_strict: bool = False,
+) -> Tuple[List[Dict], List[Dict], Dict, List]:
     """
     Build PlayMetrics import rows from Sports Affinity data.
 
-    All age-eligible players are included. Players on Jamboree teams have their
-    team name cleared (those teams won't exist in PM) but are still imported
-    so returning families don't have to re-upload their birth certificate.
+    bc_strict controls how birth certificate status is determined:
+      False (default): BC Uploaded OR BC Verified = has BC on file.
+            Use this if your region considers an uploaded BC sufficient
+            even if nobody manually reviewed it.
+      True:  Only BC Verified counts. Players who uploaded a BC but were
+            never formally verified go in the non-verified file.
 
     Returns:
-        (bc_verified_rows, non_verified_rows, stats_dict)
+        (bc_verified_rows, non_verified_rows, stats_dict, phone_corrections)
     """
     stats = {
         "total_input": len(player_upload),
@@ -312,8 +316,11 @@ def build_import_data(
         "missing_email": 0,
         "missing_dob": 0,
         "phones_blanked": 0,
+        "bc_mode": (
+            "strict (verified only)" if bc_strict else "standard (uploaded or verified)"
+        ),
     }
-    phone_corrections = []  # Track which players had invalid phones
+    phone_corrections = []
 
     # Build BC lookup from BC Info report
     bc_lookup = set()
@@ -321,7 +328,10 @@ def build_import_data(
         for _, row in player_apps.iterrows():
             bc_uploaded = row.get("BC_Uploaded")
             bc_verified = row.get("BC_Verified")
-            has_bc = pd.notna(bc_uploaded) or pd.notna(bc_verified)
+            if bc_strict:
+                has_bc = pd.notna(bc_verified)
+            else:
+                has_bc = pd.notna(bc_uploaded) or pd.notna(bc_verified)
             if has_bc:
                 key = (
                     safe_str(row.get("First Name", "")).lower()
@@ -483,6 +493,7 @@ def print_stats(
     print("=" * 60)
     print("  PLAYMETRICS IMPORT SUMMARY")
     print("=" * 60)
+    print(f"  BC Mode:                         {stats.get('bc_mode', 'standard')}")
     print(f"  Total players in source file:    {stats['total_input']}")
     if stats["aged_out"]:
         print(f"  Removed (aged out):              {stats['aged_out']}")
@@ -518,7 +529,10 @@ def print_stats(
 
 
 def process_and_write(
-    upload_files: List[str], bc_files: List[str], output_dir: str = "playmetrics_output"
+    upload_files: List[str],
+    bc_files: List[str],
+    output_dir: str = "playmetrics_output",
+    bc_strict: bool = False,
 ) -> Dict:
     """
     Core processing: load files, merge, build import CSVs, write output.
@@ -530,6 +544,10 @@ def process_and_write(
     log_lines.append("  PLAYMETRICS IMPORT — RUN LOG")
     log_lines.append("=" * 60)
     log_lines.append(f"  Date/Time: {run_time.strftime('%Y-%m-%d %H:%M:%S')}")
+    bc_mode_label = (
+        "Strict (verified only)" if bc_strict else "Standard (uploaded or verified)"
+    )
+    log_lines.append(f"  BC Mode: {bc_mode_label}")
     log_lines.append("")
 
     # ── Log input files ──
@@ -620,7 +638,7 @@ def process_and_write(
     print("─" * 40)
 
     bc_verified, non_verified, stats, phone_corrections = build_import_data(
-        player_data, bc_data
+        player_data, bc_data, bc_strict=bc_strict
     )
 
     print_stats(stats, bc_verified, non_verified, phone_corrections)
@@ -883,15 +901,33 @@ def launch_gui():
             )
             tip.grid(row=6, column=0, columnspan=2, sticky="w", pady=(5, 10))
 
+            # BC verification mode
+            bc_frame = ttk.Frame(content)
+            bc_frame.grid(row=7, column=0, columnspan=2, sticky="w", pady=(0, 5))
+
+            self.bc_strict_var = tk.BooleanVar(value=False)
+            self.bc_check = ttk.Checkbutton(
+                bc_frame,
+                text="Strict BC mode — only count verified birth certificates (not just uploaded)",
+                variable=self.bc_strict_var,
+            )
+            self.bc_check.pack(anchor="w")
+            ttk.Label(
+                bc_frame,
+                text="Default (unchecked): uploaded or verified = BC on file.  Strict: only verified by a reviewer counts.",
+                font=("Helvetica", 8),
+                foreground="#999",
+            ).pack(anchor="w", padx=(22, 0))
+
             # Run button
             self.run_btn = ttk.Button(
                 content, text="▶  Run Import", command=self._run_import
             )
-            self.run_btn.grid(row=7, column=0, columnspan=2, pady=(5, 10), sticky="ew")
+            self.run_btn.grid(row=8, column=0, columnspan=2, pady=(5, 10), sticky="ew")
 
             # Output log
             ttk.Label(content, text="Output", font=("Helvetica", 11, "bold")).grid(
-                row=8, column=0, sticky="w", pady=(5, 5)
+                row=9, column=0, sticky="w", pady=(5, 5)
             )
 
             self.log = scrolledtext.ScrolledText(
@@ -905,18 +941,18 @@ def launch_gui():
                 fg="#d4d4d4",
                 insertbackground="white",
             )
-            self.log.grid(row=9, column=0, columnspan=2, sticky="nsew", pady=(0, 10))
+            self.log.grid(row=10, column=0, columnspan=2, sticky="nsew", pady=(0, 10))
 
             # Open folder button (hidden until output exists)
             self.open_btn = ttk.Button(
                 content, text="Open Output Folder", command=self._open_output_folder
             )
-            self.open_btn.grid(row=10, column=0, columnspan=2, sticky="ew")
+            self.open_btn.grid(row=11, column=0, columnspan=2, sticky="ew")
             self.open_btn.grid_remove()
 
             # Grid weights
             content.columnconfigure(0, weight=1)
-            content.rowconfigure(9, weight=1)
+            content.rowconfigure(10, weight=1)
 
             self.output_dir = None
 
@@ -1028,7 +1064,9 @@ def launch_gui():
             sys.stdout = io.StringIO()
 
             try:
-                results = process_and_write(self.upload_files, self.bc_files)
+                results = process_and_write(
+                    self.upload_files, self.bc_files, bc_strict=self.bc_strict_var.get()
+                )
                 output = sys.stdout.getvalue()
                 self.output_dir = results["output_dir"]
             except Exception as e:
@@ -1093,6 +1131,12 @@ def main():
         action="store_true",
         help="Force interactive command-line mode (skip GUI).",
     )
+    parser.add_argument(
+        "--strict-bc",
+        action="store_true",
+        help="Strict BC mode: only count verified birth certificates, "
+        "not just uploaded. Default: uploaded or verified both count.",
+    )
     args = parser.parse_args()
 
     # ── Batch mode: --dir ──
@@ -1140,7 +1184,10 @@ def main():
             )
 
         print()
-        process_and_write(upload_files, bc_files)
+        if args.strict_bc:
+            print("  BC Mode: STRICT (only verified birth certificates count)")
+        print()
+        process_and_write(upload_files, bc_files, bc_strict=args.strict_bc)
 
         print("─" * 60)
         print("  NEXT STEPS:")
@@ -1244,7 +1291,7 @@ def main():
             print(f"  File not found: {extra}")
 
     print()
-    process_and_write(upload_files, bc_files)
+    process_and_write(upload_files, bc_files, bc_strict=args.strict_bc)
 
     print("─" * 60)
     print("  NEXT STEPS:")
