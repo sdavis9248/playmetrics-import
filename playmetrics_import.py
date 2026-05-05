@@ -62,9 +62,12 @@ import csv
 import sys
 import glob
 import argparse
+import io
+import subprocess
+import platform
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, List, Dict, Any, Tuple
+from typing import Optional, List, Dict, Any, Tuple, Callable
 
 try:
     import pandas as pd
@@ -214,16 +217,24 @@ def format_phone(phone) -> str:
     """
     Normalize phone to XXX-XXX-XXXX format.
     Handles (XXX) XXX-XXXX, XXX-XXX-XXXX, XXXXXXXXXX, 1XXXXXXXXXX.
+    Validates area code per NANP rules (must start with 2-9).
+    Returns empty string for invalid numbers so PM doesn't reject the row.
     """
     if pd.isna(phone) or not phone:
         return ""
     phone = str(phone).strip()
     digits = re.sub(r"\D", "", phone)
+    # Strip leading country code
     if len(digits) == 11 and digits.startswith("1"):
         digits = digits[1:]
     if len(digits) == 10:
+        area_code = digits[0]
+        # NANP: area codes cannot start with 0 or 1
+        if area_code in ("0", "1"):
+            return ""  # Invalid — blank it rather than fail import
         return f"{digits[:3]}-{digits[3:6]}-{digits[6:]}"
-    return phone
+    # Non-standard length — return empty rather than import garbage
+    return ""
 
 
 def format_zip(zipcode) -> str:
@@ -300,7 +311,9 @@ def build_import_data(
         "non_verified": 0,
         "missing_email": 0,
         "missing_dob": 0,
+        "phones_blanked": 0,
     }
+    phone_corrections = []  # Track which players had invalid phones
 
     # Build BC lookup from BC Info report
     bc_lookup = set()
@@ -350,6 +363,24 @@ def build_import_data(
         if not parent1_email:
             stats["missing_email"] += 1
 
+        # Format phone numbers and track invalid ones
+        raw_p1_phone = safe_str(record.get("FatherCellPhone"))
+        raw_p2_phone = safe_str(record.get("MotherCellPhone"))
+        p1_phone = format_phone(raw_p1_phone)
+        p2_phone = format_phone(raw_p2_phone)
+
+        # Track phones that were blanked due to invalid area codes
+        if raw_p1_phone and not p1_phone:
+            stats["phones_blanked"] += 1
+            phone_corrections.append(
+                f"  {first} {last}: parent1 '{raw_p1_phone}' → blanked (invalid area code)"
+            )
+        if raw_p2_phone and not p2_phone:
+            stats["phones_blanked"] += 1
+            phone_corrections.append(
+                f"  {first} {last}: parent2 '{raw_p2_phone}' → blanked (invalid area code)"
+            )
+
         # Build the PM row
         # Team is always blank — SA data has prior season teams that don't
         # exist in PM. Teams get built fresh after registration and draft.
@@ -368,11 +399,11 @@ def build_import_data(
             "parent1_email": parent1_email,
             "parent1_first_name": safe_str(record.get("FatherFirstName")),
             "parent1_last_name": safe_str(record.get("FatherLastName")),
-            "parent1_mobile_number": format_phone(record.get("FatherCellPhone")),
+            "parent1_mobile_number": p1_phone,
             "parent2_email": safe_str(record.get("MotherEmailAddress")),
             "parent2_first_name": safe_str(record.get("MotherFirstName")),
             "parent2_last_name": safe_str(record.get("MotherLastName")),
-            "parent2_mobile_number": format_phone(record.get("MotherCellPhone")),
+            "parent2_mobile_number": p2_phone,
             "street": safe_str(record.get("Address1")),
             "city": safe_str(record.get("City")),
             "state": safe_str(record.get("State")),
@@ -396,7 +427,7 @@ def build_import_data(
         key=lambda r: (r["player_last_name"].lower(), r["player_first_name"].lower())
     )
 
-    return bc_verified, non_verified, stats
+    return bc_verified, non_verified, stats, phone_corrections
 
 
 def merge_seasons(dataframes: List[pd.DataFrame]) -> pd.DataFrame:
@@ -444,7 +475,9 @@ def write_csv(filepath: str, rows: List[Dict]):
         writer.writerows(rows)
 
 
-def print_stats(stats: Dict, bc_verified: List, non_verified: List):
+def print_stats(
+    stats: Dict, bc_verified: List, non_verified: List, phone_corrections: List = None
+):
     """Print a summary report."""
     print()
     print("=" * 60)
@@ -457,11 +490,584 @@ def print_stats(stats: Dict, bc_verified: List, non_verified: List):
         print(f"  Skipped (no DOB):                {stats['missing_dob']}")
     if stats["missing_email"]:
         print(f"  ⚠️  Missing parent email:         {stats['missing_email']}")
+    if stats["phones_blanked"]:
+        print(f"  ⚠️  Invalid phones blanked:        {stats['phones_blanked']}")
     print(f"  ─────────────────────────────────")
     print(f"  BC Verified (send to PM):        {len(bc_verified)}")
     print(f"  Non-verified (import yourself):  {len(non_verified)}")
     print(f"  Total for import:                {len(bc_verified) + len(non_verified)}")
     print()
+    if phone_corrections:
+        print("  PHONE CORRECTIONS (blanked — invalid area codes):")
+        print("  " + "─" * 56)
+        for line in phone_corrections:
+            print(line)
+        print()
+        print(
+            f"  These {len(phone_corrections)} phone number(s) had area codes starting"
+        )
+        print(f"  with 0 or 1 (invalid per NANP). They've been blanked in")
+        print(f"  the CSV so PlayMetrics won't reject the import. Parents")
+        print(f"  will update their phone when they accept the invite.")
+        print()
+
+
+# =========================================================
+#  CORE PROCESSING (called by CLI and GUI)
+# =========================================================
+
+
+def process_and_write(
+    upload_files: List[str], bc_files: List[str], output_dir: str = "playmetrics_output"
+) -> Dict:
+    """
+    Core processing: load files, merge, build import CSVs, write output.
+    Returns a results dict with file paths and stats.
+    """
+    run_time = datetime.now()
+    log_lines = []
+    log_lines.append("=" * 60)
+    log_lines.append("  PLAYMETRICS IMPORT — RUN LOG")
+    log_lines.append("=" * 60)
+    log_lines.append(f"  Date/Time: {run_time.strftime('%Y-%m-%d %H:%M:%S')}")
+    log_lines.append("")
+
+    # ── Log input files ──
+    log_lines.append("  INPUT FILES")
+    log_lines.append("  " + "─" * 56)
+    log_lines.append(f"  Player Upload files ({len(upload_files)}):")
+    for f in upload_files:
+        log_lines.append(f"    • {os.path.abspath(f)}")
+    log_lines.append(f"  BC Info files ({len(bc_files)}):")
+    for f in bc_files:
+        log_lines.append(f"    • {os.path.abspath(f)}")
+    if not bc_files:
+        log_lines.append(f"    (none — all players will be non-verified)")
+    log_lines.append("")
+
+    # ── Load player upload files ──
+    upload_dfs = []
+    for f in upload_files:
+        df = load_player_upload(f)
+        upload_dfs.append(df)
+        log_lines.append(f"  Loaded {len(df)} players from {os.path.basename(f)}")
+
+    bc_dfs = []
+    for f in bc_files:
+        df = load_bc_info(f)
+        bc_dfs.append(df)
+        bc_uploaded = (
+            df["BC_Uploaded"].notna().sum() if "BC_Uploaded" in df.columns else 0
+        )
+        bc_verified_count = (
+            df["BC_Verified"].notna().sum() if "BC_Verified" in df.columns else 0
+        )
+        log_lines.append(
+            f"  Loaded {len(df)} BC records from {os.path.basename(f)}"
+            f" (verified: {bc_verified_count}, uploaded: {bc_uploaded})"
+        )
+    log_lines.append("")
+
+    # ── Merge seasons ──
+    if len(upload_dfs) > 1:
+        print()
+        print("  Merging seasons...")
+        combined_count = sum(len(df) for df in upload_dfs)
+        player_data = merge_seasons(upload_dfs)
+        dupes_removed = combined_count - len(player_data)
+        log_lines.append("  SEASON MERGE")
+        log_lines.append("  " + "─" * 56)
+        log_lines.append(
+            f"  Combined records: {combined_count} from {len(upload_dfs)} seasons"
+        )
+        log_lines.append(f"  Duplicates removed: {dupes_removed}")
+        log_lines.append(f"  Unique players after merge: {len(player_data)}")
+        log_lines.append("")
+    else:
+        player_data = upload_dfs[0]
+
+    # ── Merge BC info data ──
+    if bc_dfs:
+        if len(bc_dfs) > 1:
+            bc_data = pd.concat(bc_dfs, ignore_index=True)
+            bc_data["_key"] = (
+                bc_data["First Name"].str.strip().str.lower()
+                + "|"
+                + bc_data["Last Name"].str.strip().str.lower()
+                + "|"
+                + bc_data["DOB"].astype(str)
+            )
+            bc_data["_has_verified"] = bc_data.get(
+                "BC_Verified", pd.Series(dtype="object")
+            ).notna()
+            bc_data["_has_uploaded"] = bc_data.get(
+                "BC_Uploaded", pd.Series(dtype="object")
+            ).notna()
+            bc_data = bc_data.sort_values(
+                ["_has_verified", "_has_uploaded"], ascending=False
+            )
+            bc_before = len(bc_data)
+            bc_data = bc_data.drop_duplicates(subset="_key", keep="first")
+            log_lines.append(f"  BC info merged: {bc_before} → {len(bc_data)} unique")
+            log_lines.append("")
+        else:
+            bc_data = bc_dfs[0]
+    else:
+        bc_data = pd.DataFrame()
+
+    print()
+    print("  Building PlayMetrics import files...")
+    print("─" * 40)
+
+    bc_verified, non_verified, stats, phone_corrections = build_import_data(
+        player_data, bc_data
+    )
+
+    print_stats(stats, bc_verified, non_verified, phone_corrections)
+
+    # ── Log processing results ──
+    log_lines.append("  PROCESSING RESULTS")
+    log_lines.append("  " + "─" * 56)
+    log_lines.append(f"  Total players in source: {stats['total_input']}")
+    if stats["aged_out"]:
+        log_lines.append(f"  Aged out (removed): {stats['aged_out']}")
+    if stats["missing_dob"]:
+        log_lines.append(f"  Missing DOB (skipped): {stats['missing_dob']}")
+    if stats["missing_email"]:
+        log_lines.append(f"  Missing parent email: {stats['missing_email']}")
+    log_lines.append(f"  BC Verified: {len(bc_verified)}")
+    log_lines.append(f"  Non-verified: {len(non_verified)}")
+    log_lines.append(f"  Total for import: {len(bc_verified) + len(non_verified)}")
+    log_lines.append("")
+
+    # ── Log phone corrections ──
+    if phone_corrections:
+        log_lines.append("  PHONE CORRECTIONS (blanked — invalid area codes)")
+        log_lines.append("  " + "─" * 56)
+        for line in phone_corrections:
+            log_lines.append(line)
+        log_lines.append("")
+
+    # ── Write CSVs ──
+    print("  Writing CSV files...")
+    print("─" * 40)
+
+    timestamp = run_time.strftime("%Y%m%d")
+    os.makedirs(output_dir, exist_ok=True)
+    results = {"output_dir": output_dir, "files": []}
+
+    log_lines.append("  OUTPUT FILES")
+    log_lines.append("  " + "─" * 56)
+
+    if bc_verified:
+        verified_file = os.path.join(
+            output_dir, f"playmetrics_bc_verified_{timestamp}.csv"
+        )
+        write_csv(verified_file, bc_verified)
+        results["files"].append(verified_file)
+        print(f"  ✅ BC Verified:    {verified_file} ({len(bc_verified)} players)")
+        print(f"     → Send this file to success@playmetrics.com")
+        log_lines.append(
+            f"  BC Verified:   {verified_file} ({len(bc_verified)} players)"
+        )
+
+    if non_verified:
+        non_verified_file = os.path.join(
+            output_dir, f"playmetrics_non_verified_{timestamp}.csv"
+        )
+        write_csv(non_verified_file, non_verified)
+        results["files"].append(non_verified_file)
+        print(f"  ✅ Non-verified:   {non_verified_file} ({len(non_verified)} players)")
+        print(f"     → Import this file yourself in PlayMetrics admin.")
+        log_lines.append(
+            f"  Non-verified:  {non_verified_file} ({len(non_verified)} players)"
+        )
+
+    all_players = bc_verified + non_verified
+    if all_players:
+        combined_file = os.path.join(
+            output_dir, f"playmetrics_all_players_{timestamp}.csv"
+        )
+        write_csv(combined_file, all_players)
+        results["files"].append(combined_file)
+        print(f"  📋 Combined:      {combined_file} ({len(all_players)} players)")
+        print(f"     → Reference copy. Do not import.")
+        log_lines.append(
+            f"  Combined:      {combined_file} ({len(all_players)} players)"
+        )
+
+    # ── Write log file ──
+    log_file = os.path.join(output_dir, f"import_log_{timestamp}.txt")
+    log_lines.append("")
+    log_lines.append("=" * 60)
+    with open(log_file, "w", encoding="utf-8") as f:
+        f.write("\n".join(log_lines) + "\n")
+    results["files"].append(log_file)
+    print(f"  📋 Log:           {log_file}")
+
+    print()
+    results["stats"] = stats
+    results["bc_verified_count"] = len(bc_verified)
+    results["non_verified_count"] = len(non_verified)
+    return results
+
+
+# =========================================================
+#  GUI
+# =========================================================
+
+
+def launch_gui():
+    """Launch the tkinter GUI with optional drag-and-drop support."""
+    import tkinter as tk
+    from tkinter import ttk, filedialog, scrolledtext
+
+    # Try to load drag-and-drop support
+    has_dnd = False
+    try:
+        from tkinterdnd2 import TkinterDnD, DND_FILES
+
+        has_dnd = True
+    except ImportError:
+        pass
+
+    class ImportApp:
+        def __init__(self, root):
+            self.root = root
+            self.root.title("AYSO PlayMetrics Player Import Tool")
+            self.root.minsize(700, 600)
+
+            # File lists
+            self.upload_files = []
+            self.bc_files = []
+
+            self._build_ui()
+
+        def _build_ui(self):
+            # ── Header ──
+            header = tk.Frame(self.root, bg="#0a2351", padx=20, pady=15)
+            header.pack(fill="x")
+            tk.Label(
+                header,
+                text="AYSO PlayMetrics Player Import Tool",
+                font=("Helvetica", 16, "bold"),
+                fg="white",
+                bg="#0a2351",
+            ).pack(anchor="w")
+            tk.Label(
+                header,
+                text="Convert Sports Affinity reports → PlayMetrics CSV",
+                font=("Helvetica", 10),
+                fg="#93c5fd",
+                bg="#0a2351",
+            ).pack(anchor="w")
+
+            # ── Main content ──
+            content = ttk.Frame(self.root, padding=20)
+            content.pack(fill="both", expand=True)
+
+            # Player Upload files
+            ttk.Label(
+                content, text="Player Upload Files", font=("Helvetica", 11, "bold")
+            ).grid(row=0, column=0, sticky="w", pady=(0, 5))
+            ttk.Label(
+                content,
+                text='SA report: "Player Detail | upload format"',
+                font=("Helvetica", 9),
+            ).grid(row=1, column=0, sticky="w")
+
+            upload_frame = tk.Frame(content, bg="#f0f4f8", relief="groove", bd=2)
+            upload_frame.grid(row=2, column=0, sticky="ew", pady=(2, 5))
+
+            self.upload_listbox = tk.Listbox(
+                upload_frame,
+                height=3,
+                width=70,
+                font=("Courier", 9),
+                bg="#f0f4f8",
+                relief="flat",
+                highlightthickness=0,
+            )
+            self.upload_listbox.pack(fill="both", expand=True, padx=5, pady=5)
+
+            drop_hint = "Drag files here" if has_dnd else ""
+            self.upload_hint = tk.Label(
+                upload_frame,
+                text=f"Drop .xlsx files here or use Add Files →" if has_dnd else "",
+                font=("Helvetica", 9, "italic"),
+                fg="#999",
+                bg="#f0f4f8",
+            )
+            if has_dnd:
+                self.upload_hint.pack(pady=(0, 5))
+
+            upload_btns = ttk.Frame(content)
+            upload_btns.grid(row=2, column=1, padx=(10, 0))
+            ttk.Button(
+                upload_btns, text="Add Files...", command=self._add_upload_files
+            ).pack(fill="x", pady=1)
+            ttk.Button(
+                upload_btns, text="Clear", command=self._clear_upload_files
+            ).pack(fill="x", pady=1)
+
+            # BC Info files
+            ttk.Label(
+                content,
+                text="Birth Certificate Info Files",
+                font=("Helvetica", 11, "bold"),
+            ).grid(row=3, column=0, sticky="w", pady=(15, 5))
+            ttk.Label(
+                content, text='SA report: "Player Photo BC Info"', font=("Helvetica", 9)
+            ).grid(row=4, column=0, sticky="w")
+
+            bc_frame = tk.Frame(content, bg="#f0f4f8", relief="groove", bd=2)
+            bc_frame.grid(row=5, column=0, sticky="ew", pady=(2, 5))
+
+            self.bc_listbox = tk.Listbox(
+                bc_frame,
+                height=3,
+                width=70,
+                font=("Courier", 9),
+                bg="#f0f4f8",
+                relief="flat",
+                highlightthickness=0,
+            )
+            self.bc_listbox.pack(fill="both", expand=True, padx=5, pady=5)
+
+            self.bc_hint = tk.Label(
+                bc_frame,
+                text=f"Drop .xlsx files here or use Add Files →" if has_dnd else "",
+                font=("Helvetica", 9, "italic"),
+                fg="#999",
+                bg="#f0f4f8",
+            )
+            if has_dnd:
+                self.bc_hint.pack(pady=(0, 5))
+
+            bc_btns = ttk.Frame(content)
+            bc_btns.grid(row=5, column=1, padx=(10, 0))
+            ttk.Button(bc_btns, text="Add Files...", command=self._add_bc_files).pack(
+                fill="x", pady=1
+            )
+            ttk.Button(bc_btns, text="Clear", command=self._clear_bc_files).pack(
+                fill="x", pady=1
+            )
+
+            # Register drag-and-drop targets
+            if has_dnd:
+                upload_frame.drop_target_register(DND_FILES)
+                upload_frame.dnd_bind("<<Drop>>", self._drop_upload)
+                upload_frame.dnd_bind(
+                    "<<DragEnter>>", lambda e: upload_frame.configure(bg="#dbeafe")
+                )
+                upload_frame.dnd_bind(
+                    "<<DragLeave>>", lambda e: upload_frame.configure(bg="#f0f4f8")
+                )
+
+                bc_frame.drop_target_register(DND_FILES)
+                bc_frame.dnd_bind("<<Drop>>", self._drop_bc)
+                bc_frame.dnd_bind(
+                    "<<DragEnter>>", lambda e: bc_frame.configure(bg="#dbeafe")
+                )
+                bc_frame.dnd_bind(
+                    "<<DragLeave>>", lambda e: bc_frame.configure(bg="#f0f4f8")
+                )
+
+            # Tip
+            tip_text = (
+                "Tip: Select multiple files at once for multi-season imports. "
+                "The tool deduplicates automatically."
+            )
+            tip = ttk.Label(
+                content, text=tip_text, font=("Helvetica", 9), foreground="#666"
+            )
+            tip.grid(row=6, column=0, columnspan=2, sticky="w", pady=(5, 10))
+
+            # Run button
+            self.run_btn = ttk.Button(
+                content, text="▶  Run Import", command=self._run_import
+            )
+            self.run_btn.grid(row=7, column=0, columnspan=2, pady=(5, 10), sticky="ew")
+
+            # Output log
+            ttk.Label(content, text="Output", font=("Helvetica", 11, "bold")).grid(
+                row=8, column=0, sticky="w", pady=(5, 5)
+            )
+
+            self.log = scrolledtext.ScrolledText(
+                content,
+                height=15,
+                width=80,
+                font=("Courier", 9),
+                state="disabled",
+                wrap="word",
+                bg="#1e1e1e",
+                fg="#d4d4d4",
+                insertbackground="white",
+            )
+            self.log.grid(row=9, column=0, columnspan=2, sticky="nsew", pady=(0, 10))
+
+            # Open folder button (hidden until output exists)
+            self.open_btn = ttk.Button(
+                content, text="Open Output Folder", command=self._open_output_folder
+            )
+            self.open_btn.grid(row=10, column=0, columnspan=2, sticky="ew")
+            self.open_btn.grid_remove()
+
+            # Grid weights
+            content.columnconfigure(0, weight=1)
+            content.rowconfigure(9, weight=1)
+
+            self.output_dir = None
+
+        def _parse_drop_data(self, data):
+            """Parse dropped file paths from tkdnd event data."""
+            files = []
+            # tkdnd wraps paths with spaces in {braces} on Windows
+            # and separates multiple files with spaces
+            current = ""
+            in_braces = False
+            for char in data:
+                if char == "{":
+                    in_braces = True
+                elif char == "}":
+                    in_braces = False
+                    if current:
+                        files.append(current)
+                        current = ""
+                elif char == " " and not in_braces:
+                    if current:
+                        files.append(current)
+                        current = ""
+                else:
+                    current += char
+            if current:
+                files.append(current)
+            # Filter to .xlsx only
+            return [f for f in files if f.lower().endswith(".xlsx")]
+
+        def _drop_upload(self, event):
+            files = self._parse_drop_data(event.data)
+            for f in files:
+                if f not in self.upload_files:
+                    self.upload_files.append(f)
+                    self.upload_listbox.insert("end", os.path.basename(f))
+            if self.upload_files and has_dnd:
+                self.upload_hint.pack_forget()
+            event.widget.configure(bg="#f0f4f8")
+
+        def _drop_bc(self, event):
+            files = self._parse_drop_data(event.data)
+            for f in files:
+                if f not in self.bc_files:
+                    self.bc_files.append(f)
+                    self.bc_listbox.insert("end", os.path.basename(f))
+            if self.bc_files and has_dnd:
+                self.bc_hint.pack_forget()
+            event.widget.configure(bg="#f0f4f8")
+
+        def _add_upload_files(self):
+            files = filedialog.askopenfilenames(
+                title="Select Player Upload files",
+                filetypes=[("Excel files", "*.xlsx"), ("All files", "*.*")],
+            )
+            for f in files:
+                if f not in self.upload_files:
+                    self.upload_files.append(f)
+                    self.upload_listbox.insert("end", os.path.basename(f))
+            if self.upload_files and has_dnd:
+                self.upload_hint.pack_forget()
+
+        def _clear_upload_files(self):
+            self.upload_files.clear()
+            self.upload_listbox.delete(0, "end")
+            if has_dnd:
+                self.upload_hint.pack(pady=(0, 5))
+
+        def _add_bc_files(self):
+            files = filedialog.askopenfilenames(
+                title="Select Player Photo BC Info files",
+                filetypes=[("Excel files", "*.xlsx"), ("All files", "*.*")],
+            )
+            for f in files:
+                if f not in self.bc_files:
+                    self.bc_files.append(f)
+                    self.bc_listbox.insert("end", os.path.basename(f))
+            if self.bc_files and has_dnd:
+                self.bc_hint.pack_forget()
+
+        def _clear_bc_files(self):
+            self.bc_files.clear()
+            self.bc_listbox.delete(0, "end")
+            if has_dnd:
+                self.bc_hint.pack(pady=(0, 5))
+
+        def _log_write(self, text):
+            self.log.configure(state="normal")
+            self.log.insert("end", text + "\n")
+            self.log.see("end")
+            self.log.configure(state="disabled")
+            self.root.update_idletasks()
+
+        def _run_import(self):
+            if not self.upload_files:
+                self._log_write("ERROR: No Player Upload files selected.")
+                return
+
+            # Clear log
+            self.log.configure(state="normal")
+            self.log.delete("1.0", "end")
+            self.log.configure(state="disabled")
+            self.open_btn.grid_remove()
+
+            self.run_btn.configure(state="disabled")
+            self.root.update_idletasks()
+
+            # Redirect stdout to capture print output
+            old_stdout = sys.stdout
+            sys.stdout = io.StringIO()
+
+            try:
+                results = process_and_write(self.upload_files, self.bc_files)
+                output = sys.stdout.getvalue()
+                self.output_dir = results["output_dir"]
+            except Exception as e:
+                output = sys.stdout.getvalue()
+                output += f"\n\nERROR: {e}"
+                import traceback
+
+                output += "\n" + traceback.format_exc()
+            finally:
+                sys.stdout = old_stdout
+
+            self._log_write(output)
+
+            if self.output_dir:
+                self.open_btn.grid()
+                self._log_write("─" * 50)
+                self._log_write("  Done! Click 'Open Output Folder' to see your files.")
+
+            self.run_btn.configure(state="normal")
+
+        def _open_output_folder(self):
+            if not self.output_dir:
+                return
+            folder = os.path.abspath(self.output_dir)
+            if platform.system() == "Windows":
+                os.startfile(folder)
+            elif platform.system() == "Darwin":
+                subprocess.run(["open", folder])
+            else:
+                subprocess.run(["xdg-open", folder])
+
+    # Create root window — use TkinterDnD if available for drag-and-drop
+    if has_dnd:
+        root = TkinterDnD.Tk()
+    else:
+        root = tk.Tk()
+
+    app = ImportApp(root)
+    root.mainloop()
 
 
 # =========================================================
@@ -482,26 +1088,28 @@ def main():
         "playerUpload*.xlsx and Player*Photo*BC*.xlsx files "
         "found, merging multiple seasons automatically.",
     )
+    parser.add_argument(
+        "--cli",
+        action="store_true",
+        help="Force interactive command-line mode (skip GUI).",
+    )
     args = parser.parse_args()
 
-    print()
-    print("╔══════════════════════════════════════════════════════╗")
-    print("║  AYSO PlayMetrics Player Import Tool                ║")
-    print("║  Converts Sports Affinity data → PlayMetrics CSV    ║")
-    print("╚══════════════════════════════════════════════════════╝")
-    print()
-
+    # ── Batch mode: --dir ──
     if args.dir:
-        # ── Batch mode: auto-load everything from the specified folder ──
         folder = args.dir.strip().strip('"')
         if not os.path.isdir(folder):
             print(f"  ERROR: Folder not found: {folder}")
             sys.exit(1)
 
+        print()
+        print("╔══════════════════════════════════════════════════════╗")
+        print("║  AYSO PlayMetrics Player Import Tool                ║")
+        print("╚══════════════════════════════════════════════════════╝")
+        print()
         print(f"  Scanning folder: {folder}")
         print("─" * 40)
 
-        # Find all matching files
         upload_files = sorted(glob.glob(os.path.join(folder, "playerUpload*.xlsx")))
         if not upload_files:
             upload_files = sorted(
@@ -528,216 +1136,121 @@ def main():
                 print(f"    • {os.path.basename(f)}")
         else:
             print(
-                "  ⚠️  No Player_Photo_BC*.xlsx files found — all players will be non-verified"
+                "  ⚠️  No Player Photo BC files found — all players will be non-verified"
             )
 
         print()
+        process_and_write(upload_files, bc_files)
 
-        # Load all files
-        print("  Loading data...")
-        print("─" * 40)
-        upload_dfs = [load_player_upload(f) for f in upload_files]
-        bc_dfs = [load_bc_info(f) for f in bc_files]
-
-    else:
-        # ── Interactive mode: prompt for files ──
-        print("  Tip: Use --dir <folder> to auto-load all files from a folder")
+        print("─" * 60)
+        print("  NEXT STEPS:")
+        print("  1. Spot-check 10-15 records against your source data")
+        print("  2. Send the BC-verified file to success@playmetrics.com")
+        print("  3. Import the non-verified file in PlayMetrics (Players → Import)")
+        print("─" * 60)
         print()
+        return
 
-        # ── Step 1: Locate files ──
-        print("STEP 1: Locate source files")
-        print("─" * 40)
+    # ── GUI mode (default) ──
+    if not args.cli:
+        try:
+            launch_gui()
+            return
+        except Exception:
+            # tkinter not available (headless server) — fall through to CLI
+            pass
 
-        # Try auto-detection first
-        upload_file = find_file("playerUpload*.xlsx") or find_file(
-            "PlayerDetail*upload*.xlsx"
+    # ── Interactive CLI mode ──
+    print()
+    print("╔══════════════════════════════════════════════════════╗")
+    print("║  AYSO PlayMetrics Player Import Tool                ║")
+    print("║  Converts Sports Affinity data → PlayMetrics CSV    ║")
+    print("╚══════════════════════════════════════════════════════╝")
+    print()
+    print("  Tip: Use --dir <folder> to auto-load all files from a folder")
+    print()
+
+    print("STEP 1: Locate source files")
+    print("─" * 40)
+
+    upload_file = find_file("playerUpload*.xlsx") or find_file(
+        "PlayerDetail*upload*.xlsx"
+    )
+    bc_file = (
+        find_file("Player_Photo_BC*.xlsx")
+        or find_file("Player Photo BC*.xlsx")
+        or find_file("PlayerPhotoBC*.xlsx")
+    )
+
+    if upload_file:
+        print(f"  Found player upload: {upload_file}")
+        resp = input(f"  Use this file? (Y/n): ").strip().lower()
+        if resp == "n":
+            upload_file = None
+
+    if not upload_file:
+        upload_file = (
+            input("  Path to 'Player Detail | upload format' Excel file: ")
+            .strip()
+            .strip('"')
         )
+        if not os.path.exists(upload_file):
+            print(f"  ERROR: File not found: {upload_file}")
+            sys.exit(1)
+
+    if bc_file:
+        print(f"  Found BC info: {bc_file}")
+        resp = input(f"  Use this file? (Y/n): ").strip().lower()
+        if resp == "n":
+            bc_file = None
+
+    if not bc_file:
         bc_file = (
-            find_file("Player_Photo_BC*.xlsx")
-            or find_file("Player Photo BC*.xlsx")
-            or find_file("PlayerPhotoBC*.xlsx")
+            input("  Path to 'Player Photo BC Info' Excel file (or Enter to skip): ")
+            .strip()
+            .strip('"')
         )
+        if bc_file and not os.path.exists(bc_file):
+            print(f"  ERROR: File not found: {bc_file}")
+            bc_file = None
 
-        if upload_file:
-            print(f"  Found player upload: {upload_file}")
-            resp = input(f"  Use this file? (Y/n): ").strip().lower()
-            if resp == "n":
-                upload_file = None
+    print()
 
-        if not upload_file:
-            upload_file = (
-                input("  Path to 'Player Detail | upload format' Excel file: ")
+    print("STEP 2: Additional seasons (optional)")
+    print("─" * 40)
+    print("  If you downloaded reports for prior years, you can include them.")
+    print()
+
+    upload_files = [upload_file]
+    bc_files = [bc_file] if bc_file else []
+
+    while True:
+        resp = (
+            input("  Add another season's playerUpload file? (y/N): ").strip().lower()
+        )
+        if resp != "y":
+            break
+        extra = input("  Path to additional playerUpload file: ").strip().strip('"')
+        if os.path.exists(extra):
+            upload_files.append(extra)
+            extra_bc = (
+                input("  Corresponding Player Photo BC Info file (or Enter to skip): ")
                 .strip()
                 .strip('"')
             )
-            if not os.path.exists(upload_file):
-                print(f"  ERROR: File not found: {upload_file}")
-                sys.exit(1)
-
-        if bc_file:
-            print(f"  Found BC info: {bc_file}")
-            resp = input(f"  Use this file? (Y/n): ").strip().lower()
-            if resp == "n":
-                bc_file = None
-
-        if not bc_file:
-            bc_file = (
-                input(
-                    "  Path to 'Player Photo BC Info' Excel file (or Enter to skip): "
-                )
-                .strip()
-                .strip('"')
-            )
-            if bc_file and not os.path.exists(bc_file):
-                print(f"  ERROR: File not found: {bc_file}")
-                bc_file = None
-
-        print()
-
-        # ── Step 2: Multi-season? ──
-        print("STEP 2: Additional seasons (optional)")
-        print("─" * 40)
-        print("  If you downloaded reports for prior years, you can include them")
-        print("  to capture returning players. The tool will deduplicate and keep")
-        print("  the most recent contact info.")
-        print()
-
-        additional_uploads = []
-        additional_bc = []
-
-        while True:
-            resp = (
-                input("  Add another season's playerUpload file? (y/N): ")
-                .strip()
-                .lower()
-            )
-            if resp != "y":
-                break
-            extra = input("  Path to additional playerUpload file: ").strip().strip('"')
-            if os.path.exists(extra):
-                additional_uploads.append(extra)
-                extra_bc = (
-                    input(
-                        "  Corresponding Player Photo BC Info file (or Enter to skip): "
-                    )
-                    .strip()
-                    .strip('"')
-                )
-                if extra_bc and os.path.exists(extra_bc):
-                    additional_bc.append(extra_bc)
-            else:
-                print(f"  File not found: {extra}")
-
-        print()
-
-        # Load files
-        print("  Loading data...")
-        print("─" * 40)
-        upload_dfs = [load_player_upload(upload_file)]
-        for extra in additional_uploads:
-            upload_dfs.append(load_player_upload(extra))
-
-        bc_dfs = []
-        if bc_file:
-            bc_dfs.append(load_bc_info(bc_file))
-        for extra in additional_bc:
-            bc_dfs.append(load_bc_info(extra))
-
-    # ── Common processing (both modes) ──
-
-    # Merge seasons if needed
-    if len(upload_dfs) > 1:
-        print()
-        print("  Merging seasons...")
-        player_data = merge_seasons(upload_dfs)
-    else:
-        player_data = upload_dfs[0]
-
-    # Merge BC info data
-    if bc_dfs:
-        if len(bc_dfs) > 1:
-            bc_data = pd.concat(bc_dfs, ignore_index=True)
-            # Deduplicate — keep record with most BC info
-            bc_data["_key"] = (
-                bc_data["First Name"].str.strip().str.lower()
-                + "|"
-                + bc_data["Last Name"].str.strip().str.lower()
-                + "|"
-                + bc_data["DOB"].astype(str)
-            )
-            # Prefer records that have BC_Verified, then BC_Uploaded
-            bc_data["_has_verified"] = bc_data.get(
-                "BC_Verified", pd.Series(dtype="object")
-            ).notna()
-            bc_data["_has_uploaded"] = bc_data.get(
-                "BC_Uploaded", pd.Series(dtype="object")
-            ).notna()
-            bc_data = bc_data.sort_values(
-                ["_has_verified", "_has_uploaded"], ascending=False
-            )
-            bc_data = bc_data.drop_duplicates(subset="_key", keep="first")
+            if extra_bc and os.path.exists(extra_bc):
+                bc_files.append(extra_bc)
         else:
-            bc_data = bc_dfs[0]
-    else:
-        bc_data = pd.DataFrame()
+            print(f"  File not found: {extra}")
 
     print()
+    process_and_write(upload_files, bc_files)
 
-    # ── Build import files ──
-    print("  Building PlayMetrics import files...")
-    print("─" * 40)
-
-    bc_verified, non_verified, stats = build_import_data(player_data, bc_data)
-
-    print_stats(stats, bc_verified, non_verified)
-
-    # ── Write output ──
-    print("  Writing CSV files...")
-    print("─" * 40)
-
-    timestamp = datetime.now().strftime("%Y%m%d")
-    output_dir = "playmetrics_output"
-    os.makedirs(output_dir, exist_ok=True)
-
-    if bc_verified:
-        verified_file = os.path.join(
-            output_dir, f"playmetrics_bc_verified_{timestamp}.csv"
-        )
-        write_csv(verified_file, bc_verified)
-        print(f"  ✅ BC Verified:    {verified_file} ({len(bc_verified)} players)")
-        print(f"     → Send this file to success@playmetrics.com")
-        print(f"       They will import and flag these players as BC-verified.")
-
-    if non_verified:
-        non_verified_file = os.path.join(
-            output_dir, f"playmetrics_non_verified_{timestamp}.csv"
-        )
-        write_csv(non_verified_file, non_verified)
-        print(f"  ✅ Non-verified:   {non_verified_file} ({len(non_verified)} players)")
-        print(f"     → Import this file yourself in PlayMetrics admin.")
-        print(
-            f"       These players will be prompted to upload a BC during registration."
-        )
-
-    # Also write a combined file for reference
-    all_players = bc_verified + non_verified
-    if all_players:
-        combined_file = os.path.join(
-            output_dir, f"playmetrics_all_players_{timestamp}.csv"
-        )
-        write_csv(combined_file, all_players)
-        print(f"  📋 Combined:      {combined_file} ({len(all_players)} players)")
-        print(f"     → Reference copy. Do not import this — use the split files above.")
-
-    print()
     print("─" * 60)
     print("  NEXT STEPS:")
-    print(f"  1. Review the CSV files in the '{output_dir}/' folder")
-    print(f"  2. Spot-check 10-15 records against your source data")
-    print(f"  3. Send the BC-verified file to success@playmetrics.com")
-    print(f"  4. Import the non-verified file in PlayMetrics (Players → Import)")
-    print(f"  5. Send invites to imported families")
-    print(f"  6. THEN open registration")
+    print("  1. Spot-check 10-15 records against your source data")
+    print("  2. Send the BC-verified file to success@playmetrics.com")
+    print("  3. Import the non-verified file in PlayMetrics (Players → Import)")
     print("─" * 60)
     print()
 

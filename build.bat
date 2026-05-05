@@ -16,7 +16,7 @@ if exist venv\Scripts\activate.bat (
 
 REM Build the exe
 echo Building single-file executable...
-pyinstaller --onefile --name PlayMetricsImport playmetrics_import.py
+pyinstaller --onefile --windowed --name PlayMetricsImport --collect-all tkinterdnd2 playmetrics_import.py
 
 if %ERRORLEVEL% NEQ 0 (
     echo.
@@ -37,13 +37,18 @@ echo.
 echo   To distribute, copy these files together:
 echo     dist\PlayMetricsImport.exe
 echo     README.txt
+echo     PlayMetrics_Import_Guide.html
 echo.
 
-REM Copy README.txt to dist for easy packaging
+REM Copy distribution files to dist for easy packaging
 if exist README.txt (
     copy README.txt dist\README.txt >nul
     echo   README.txt copied to dist\ folder.
-    echo.
 )
+if exist PlayMetrics_Import_Guide.html (
+    copy PlayMetrics_Import_Guide.html dist\PlayMetrics_Import_Guide.html >nul
+    echo   PlayMetrics_Import_Guide.html copied to dist\ folder.
+)
+echo.
 
 pause
