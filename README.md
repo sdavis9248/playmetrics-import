@@ -142,7 +142,6 @@ MIT — see [LICENSE](LICENSE)
 ## Author
 
 Steve Davis, Registrar — AYSO Region 58
-Built with assistance from Claude (Anthropic)
 
 ## Links
 
