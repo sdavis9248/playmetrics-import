@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PlayMetrics Migration Status — Region 58</title>
+<link href="https://fonts.googleapis.com/css2?family=Anybody:wght@400;600;800&family=Source+Serif+4:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">
+<style>
+  :root { --ink:#1c1917;--paper:#fafaf9;--warm:#f5f0eb;--accent:#1d4ed8;--accent-soft:#dbeafe;--green:#166534;--green-soft:#dcfce7;--amber:#92400e;--amber-soft:#fef3c7;--red:#991b1b;--red-soft:#fee2e2;--gray:#78716c;--border:#e7e5e4; }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:'Source Serif 4',Georgia,serif;background:var(--paper);color:var(--ink);line-height:1.7}
+  header{background:var(--ink);color:var(--paper);padding:2.5rem 2rem}
+  header h1{font-family:'Anybody',sans-serif;font-weight:800;font-size:1.8rem;letter-spacing:-0.03em;line-height:1.15}
+  header .meta{font-size:.82rem;opacity:.6;margin-top:.3rem;font-family:'Anybody',sans-serif}
+  .container{max-width:820px;margin:0 auto;padding:1.5rem 1.5rem 4rem}
+  .progress-header{background:var(--warm);border-radius:8px;padding:1.25rem 1.5rem;margin:1.5rem 0;display:flex;align-items:center;gap:1.5rem;flex-wrap:wrap}
+  .progress-ring{position:relative;width:80px;height:80px;flex-shrink:0}
+  .progress-ring svg{transform:rotate(-90deg)}
+  .progress-ring circle{fill:none;stroke-width:6}
+  .progress-ring .bg{stroke:var(--border)}
+  .progress-ring .fill{stroke:var(--green);stroke-linecap:round;stroke-dasharray:220;stroke-dashoffset:17.6}
+  .progress-ring .pct{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-family:'Anybody',sans-serif;font-weight:800;font-size:1.1rem}
+  .progress-stats{font-size:.88rem}
+  .progress-stats strong{font-family:'Anybody',sans-serif;font-weight:700}
+  .verified{font-family:'Anybody',sans-serif;font-weight:600;font-size:.65rem;text-transform:uppercase;letter-spacing:.06em;padding:.15rem .5rem;border-radius:3px;background:var(--green-soft);color:var(--green);margin-left:.3rem}
+  h2{font-family:'Anybody',sans-serif;font-weight:800;font-size:1.2rem;margin:2.25rem 0 .6rem;letter-spacing:-0.02em;padding-bottom:.35rem;border-bottom:2px solid var(--ink)}
+  h3{font-family:'Anybody',sans-serif;font-weight:600;font-size:.95rem;margin:1.25rem 0 .4rem;color:var(--accent)}
+  p{margin-bottom:.6rem;font-size:.92rem}
+  .tag{display:inline-block;font-family:'Anybody',sans-serif;font-weight:600;font-size:.65rem;text-transform:uppercase;letter-spacing:.06em;padding:.15rem .5rem;border-radius:3px;vertical-align:middle;margin-left:.4rem}
+  .tag-done{background:var(--green-soft);color:var(--green)}
+  .tag-progress{background:var(--accent-soft);color:var(--accent)}
+  .tag-waiting{background:var(--amber-soft);color:var(--amber)}
+  .tag-blocked{background:var(--red-soft);color:var(--red)}
+  .tag-later{background:#f3e8ff;color:#6b21a8}
+  .item-group{margin:.75rem 0}
+  .item{display:flex;align-items:flex-start;gap:.6rem;padding:.5rem 0;border-bottom:1px solid #f0f0f0;font-size:.88rem}
+  .item:last-child{border-bottom:none}
+  .item-icon{flex-shrink:0;width:20px;text-align:center;font-size:.85rem;margin-top:2px}
+  .item-text{flex:1}
+  .item-text .detail{color:var(--gray);font-size:.8rem;font-style:italic}
+  .item-owner{font-family:'Anybody',sans-serif;font-weight:600;font-size:.7rem;color:var(--gray);text-transform:uppercase;letter-spacing:.04em;flex-shrink:0;margin-top:3px}
+  .callout{padding:.85rem 1.1rem;border-left:4px solid;border-radius:4px;margin:1rem 0;font-size:.85rem}
+  .callout-blue{background:var(--accent-soft);border-color:var(--accent)}
+  .callout-amber{background:var(--amber-soft);border-color:#d97706}
+  .callout-green{background:var(--green-soft);border-color:var(--green)}
+  .callout-red{background:var(--red-soft);border-color:var(--red)}
+  .callout strong{display:block;margin-bottom:.15rem}
+  .card{background:white;border:1px solid var(--border);border-radius:8px;padding:1rem 1.25rem;margin:.75rem 0}
+  .card h4{font-family:'Anybody',sans-serif;font-weight:600;font-size:.88rem;margin-bottom:.3rem}
+  .card p{font-size:.85rem;margin-bottom:.4rem}
+  table{width:100%;border-collapse:collapse;margin:.75rem 0;font-size:.85rem}
+  th{font-family:'Anybody',sans-serif;font-weight:600;text-align:left;padding:.5rem .6rem;background:var(--warm);border:1px solid var(--border);font-size:.78rem;text-transform:uppercase;letter-spacing:.03em}
+  td{padding:.45rem .6rem;border:1px solid var(--border);vertical-align:top}
+  .ref-links{display:flex;flex-wrap:wrap;gap:.35rem;margin:.6rem 0}
+  .ref-link{font-family:'Anybody',sans-serif;font-weight:400;font-size:.72rem;padding:.15rem .45rem;background:var(--accent-soft);border-radius:3px;color:var(--accent);text-decoration:none;white-space:nowrap}
+  .ref-link:hover{text-decoration:underline}
+  footer{margin-top:2.5rem;padding-top:1rem;border-top:1px solid var(--border);font-size:.78rem;color:var(--gray);font-family:'Anybody',sans-serif}
+  a{color:var(--accent)}
+  @media(max-width:600px){header{padding:1.5rem 1rem}.container{padding:1rem}.progress-header{flex-direction:column;align-items:flex-start}}
+  @media print{header{background:white;color:black;border-bottom:3px solid black}body{font-size:10pt}}
+</style>
+</head>
+<body>
+
+  <div style="background:#0a2351;padding:8px 16px;text-align:center;">
+    <a href="index.html" style="color:rgba(255,255,255,0.85);text-decoration:none;font-family:Anybody,-apple-system,sans-serif;font-size:13px;font-weight:600;letter-spacing:0.02em;">← AYSO Region 58 — All Guides</a>
+  </div>
+
+<header>
+  <h1>PlayMetrics Migration Status</h1>
+  <div class="meta">AYSO Region 58 — Fall 2026 Season &nbsp;|&nbsp; Last updated May 18, 2026</div>
+</header>
+<nav style="background:#f5f0eb;padding:0.5rem 1.5rem;font-family:Anybody,sans-serif;font-size:0.82rem;border-bottom:1px solid #e7e5e4;"><a href="index.html" style="color:#1d4ed8;text-decoration:none;font-weight:600;">← All Region 58 Guides</a></nav>
+<div class="container">
+
+  <div class="progress-header">
+    <div class="progress-ring"><svg width="80" height="80" viewBox="0 0 80 80"><circle class="bg" cx="40" cy="40" r="35"/><circle class="fill" cx="40" cy="40" r="35" style="stroke-dashoffset:11"/></svg><div class="pct">95%</div></div>
+    <div class="progress-stats"><strong>Ready to launch. All imports complete. Invitation tracking confirmed.</strong><br>2,334 BC-verified + 178 non-verified + new SC accounts imported. 8 test registrations completed. Account enabled. Heather confirmed invitation resend and tracking tools. Next: send heads-up email, trigger invitations, open to public.</div>
+  </div>
+
+  <div class="callout callout-green"><strong>✅ Full Registration Flow Validated</strong>Test group (4 board families, 8 players) registered May 16 via imported invitation links. Invitation emails, registration, confirmation emails, volunteer signups, and coaching requests all working. Annie Grabarsky: "It was an easy process!" App flow also tested by Sara — "the app flow is great."</div>
+
+  <h2>Team & Contacts</h2>
+  <table>
+    <tr><th>Person</th><th>Role</th><th>Responsibilities</th></tr>
+    <tr><td><strong>Sara Zaldivar</strong></td><td>Regional Commissioner (RC)</td><td>Program review, oversight, PM liaison</td></tr>
+    <tr><td><strong>Steven Davis</strong></td><td>Registrar</td><td>Data migration, automation, platform config, technical lead</td></tr>
+    <tr><td><strong>Kristen Gillespie</strong></td><td>Treasurer / Controller</td><td>Merchant account, refund policy, financial settings</td></tr>
+    <tr><td><strong>Ben Hauser</strong></td><td>Game Scheduling</td><td>Field setup, game schedule creation, standings, score tracking</td></tr>
+    <tr><td><strong>Jay Spillane</strong></td><td>CVPA</td><td>Volunteer compliance, background checks, certifications, fingerprint fair</td></tr>
+    <tr><td><strong>Mike Lauer</strong></td><td>Ref Admin</td><td>Referee management, referee scheduling</td></tr>
+    <tr><td colspan="3" style="text-align:center;color:var(--gray);font-size:.8rem">PlayMetrics: <a href="mailto:success@playmetrics.com">success@playmetrics.com</a> · SC Redirect: Sports Connect support · AYSO Marketing: <a href="mailto:Hannahsmith@ayso.org">Hannahsmith@ayso.org</a></td></tr>
+  </table>
+
+  <h2>Verified Configuration <span class="verified">Live Audit April 26</span></h2>
+
+  <h3>Program & Region</h3>
+  <div class="item-group">
+    <div class="item"><div class="item-icon">✅</div><div class="item-text">Program: "League 2026 Fall Core" (ID 101848), status: Draft<div class="detail">Region: AYSO Region 58 (Van Nuys/Sherman Oaks). Signup type: Open to everyone.</div></div></div>
+    <div class="item"><div class="item-icon">✅</div><div class="item-text">Season starts Saturday September 19, 2026 for 14U and younger<div class="detail">16U and 19U tentatively start SUNDAY August 16, 2026, expected to finish before high school soccer season.</div></div></div>
+  </div>
+
+  <h3>Packages (17 divisions)</h3>
+  <table>
+    <tr><th>Package</th><th>Gender</th><th>Spots</th><th>Price</th><th>Notes</th></tr>
+    <tr><td>05U Schoolyard</td><td>Coed</td><td>60</td><td>$205</td><td></td></tr>
+    <tr><td>06UB Boys</td><td>Male</td><td>60</td><td>$205</td><td rowspan="2">6U is gendered</td></tr>
+    <tr><td>06UG Girls</td><td>Female</td><td>36</td><td>$205</td></tr>
+    <tr><td>07UB Boys</td><td>Male</td><td>84</td><td>$205</td><td></td></tr>
+    <tr><td>07UG Girls</td><td>Female</td><td>42</td><td>$205</td><td></td></tr>
+    <tr><td>08UB Boys</td><td>Male</td><td>70</td><td>$205</td><td></td></tr>
+    <tr><td>08UG Girls</td><td>Female</td><td>56</td><td>$205</td><td></td></tr>
+    <tr><td>10UB Boys</td><td>Male</td><td>180</td><td>$205</td><td></td></tr>
+    <tr><td>10UG Girls</td><td>Female</td><td>126</td><td>$205</td><td></td></tr>
+    <tr><td>12UB Boys</td><td>Male</td><td>144</td><td>$205</td><td></td></tr>
+    <tr><td>12UG Girls</td><td>Female</td><td>72</td><td>$205</td><td></td></tr>
+    <tr><td>14UB Boys</td><td>Male</td><td>84</td><td>$205</td><td></td></tr>
+    <tr><td>14UG Girls</td><td>Female</td><td>28</td><td>$205</td><td></td></tr>
+    <tr><td>16UB Boys</td><td>Male</td><td>48</td><td>$205</td><td></td></tr>
+    <tr><td>16UG Girls</td><td>Female</td><td>20</td><td>$205</td><td></td></tr>
+    <tr><td>19UB Boys</td><td>Male</td><td>22</td><td>$205</td><td rowspan="2">Waitlist enabled</td></tr>
+    <tr><td>19UG Girls</td><td>Female</td><td>22</td><td>$205</td></tr>
+  </table>
+
+  <h3>Pricing & Discounts</h3>
+  <div class="item-group">
+    <div class="item"><div class="item-icon">✅</div><div class="item-text">Base price: <strong>$205 flat</strong> across all divisions<div class="detail">Total to parent: $230 ($205 + $25 NPF). With early bird: $200 ($175 + $25).</div></div></div>
+    <div class="item"><div class="item-icon">✅</div><div class="item-text">Early bird: <strong>$30 off</strong> — currently active, verified at checkout<div class="detail">Shows as "Discounts Applied" label. $205 → $175 per player.</div></div></div>
+    <div class="item"><div class="item-icon">✅</div><div class="item-text">Multi-player: $15 off 3rd+ player (not triggered in 2-player test — correct)</div></div>
+    <div class="item"><div class="item-icon">✅</div><div class="item-text">NPF: "AYSO Membership Fee MY2026" — $25 per player as separate Club Fee at checkout</div></div>
+    <div class="item"><div class="item-icon">✅</div><div class="item-text">Region absorbs CC + service fees — no fees visible to parent</div></div>
+    <div class="item"><div class="item-icon">✅</div><div class="item-text">Donation: "Add a donation?" prompt at checkout</div></div>
+    <div class="item"><div class="item-icon">✅</div><div class="item-text">No payment plans. No late fee. Financial aid OFF.</div></div>
+  </div>
+
+  <h3>Player Questions — Section 1 of 4 (per player)</h3>
+  <p>19 form elements configured. Parent sees these for each child:</p>
+  <div class="item-group">
+    <div class="item"><div class="item-icon">1</div><div class="item-text"><strong>Player Photo</strong> — file upload, optional<div class="detail">"Please provide a forward facing headshot without any head gear, sunglasses, other people, or pets."</div></div></div>
+    <div class="item"><div class="item-icon">2</div><div class="item-text"><strong>Birth Certificate Upload</strong> — file upload, "skip verified players" toggled ON<div class="detail">Conditional radio question ("Have you played before?") removed per Heather (May 14). Upload element retained. Verified players from import automatically skip.</div></div></div>
+    <div class="item"><div class="item-icon">3</div><div class="item-text"><strong>Division</strong> — package-specific dropdown, auto-populated with division name<div class="detail">For 6U/7U/8U: shows "Do you have a team mate request?" Yes/No + "Do you have a coach request?" Yes/No. For 10U+: parent sees their division name only, no linked questions — clean display.</div></div></div>
+    <div class="item"><div class="item-icon">4</div><div class="item-text"><strong>School Name</strong> — text field</div></div>
+    <div class="item"><div class="item-icon">5</div><div class="item-text"><strong>Years of Soccer Experience</strong> — dropdown (None, 1, 2, 3, 4+)</div></div>
+    <div class="item"><div class="item-icon">6</div><div class="item-text"><strong>Positions Played</strong> — dropdown (Goal Keeper, Defense, Mid Field, Forward, Winger, Not Applicable)</div></div>
+    <div class="item"><div class="item-icon">7</div><div class="item-text"><strong>Player Uniform Sizes</strong> — dropdown (Child Sizes, Adult Sizes)</div></div>
+    <div class="item"><div class="item-icon">8</div><div class="item-text"><strong>Player Jersey Sizes</strong> — dropdown (Extra Small, Small, Medium, Large, Extra Large, Extra Extra Large)</div></div>
+    <div class="item"><div class="item-icon">9</div><div class="item-text"><strong>Player Short Sizes</strong> — dropdown (Extra Small, Small, Medium, Large, Extra Large, Extra Extra Large)</div></div>
+    <div class="item"><div class="item-icon">10</div><div class="item-text"><strong>Medical</strong> — "Does your player have any conditions of which program staff should be aware?" Yes/No<div class="detail">"Yes" triggers linked text field. Verified working on Mary's page.</div></div></div>
+    <div class="item"><div class="item-icon">11</div><div class="item-text"><strong>Soccer experience outside Region 58</strong> — multi-select<div class="detail">"None" option added after test group feedback (Steve Post chose "Other" as workaround). Fixed by Sara May 16.</div></div></div>
+    <div class="item"><div class="item-icon">12</div><div class="item-text"><strong>Coach Request</strong> — full name text field (added from board meeting)</div></div>
+    <div class="item"><div class="item-icon">13</div><div class="item-text"><strong>Soccer Position Preference</strong> — dropdown (surfaces club experience without asking directly)</div></div>
+    <div class="item"><div class="item-icon">14</div><div class="item-text"><strong>AYSO Standards of Conduct Waiver</strong></div></div>
+    <div class="item"><div class="item-icon">15</div><div class="item-text"><strong>AYSO Player and Parent Agreement & Liability Release Waiver</strong></div></div>
+  </div>
+
+  <h3>Program Questions — Section 2 of 4 (once per registration)</h3>
+  <div class="item-group">
+    <div class="item"><div class="item-icon">1</div><div class="item-text"><strong>Emergency Contact: Relationship to Player</strong></div></div>
+    <div class="item"><div class="item-icon">2</div><div class="item-text"><strong>Emergency Contact: Person to Notify</strong></div></div>
+    <div class="item"><div class="item-icon">3</div><div class="item-text"><strong>Emergency Contact: Telephone</strong></div></div>
+    <div class="item"><div class="item-icon">4</div><div class="item-text"><strong>Volunteering Obligation</strong> — "Are you aware that each family are obligated to volunteer 2 times during season for field setup, field takedown, info tent, field monitoring?" Yes/No</div></div>
+  </div>
+
+  <h3>Volunteering — Section 3 of 4</h3>
+  <div class="item-group">
+    <div class="item"><div class="item-icon">✅</div><div class="item-text">5 positions: Head Coach, Assistant Coach, Team Manager, Referee, Board Member<div class="detail">Head Coach collects contact info inline (Email, First Name, Last Name, Mobile Number) and triggers League coaching request questions.</div></div></div>
+  </div>
+
+  <h3>Coaching Request Questions (triggered by Head Coach)</h3>
+  <div class="item-group">
+    <div class="item"><div class="item-icon">✅</div><div class="item-text"><strong>Experience:</strong> coached before (Yes/No), age groups (6U–19U checkboxes), licenses (6U, 8U, 10U, 12U, Intermediate, Advanced)</div></div>
+    <div class="item"><div class="item-icon">✅</div><div class="item-text"><strong>Role:</strong> Head Coach / Assistant Coach checkboxes</div></div>
+    <div class="item"><div class="item-icon">✅</div><div class="item-text"><strong>Training:</strong> full requirement list (Background Check, SafeSport, Safe Haven, Concussion, Sudden Cardiac Arrest, Laws of the Game, CA Fingerprinting), commitment Yes/No</div></div>
+    <div class="item"><div class="item-icon">✅</div><div class="item-text"><strong>Jersey:</strong> need new one (Yes/No), linked Gender Style (Men/Women) + Size (Extra Small–Extra Extra Large)</div></div>
+  </div>
+
+  <h3>Checkout — Section 4 of 4</h3>
+  <p>Verified with 2-player test (Bruce 07UB + Mary 10UG):</p>
+  <table>
+    <tr><th>Line</th><th>Amount</th></tr>
+    <tr><td>Total (2 Programs)</td><td>$410.00</td></tr>
+    <tr><td>Club Fees (NPF × 2)</td><td>$50.00</td></tr>
+    <tr><td>Total Discounts (early bird × 2)</td><td>-$60.00</td></tr>
+    <tr><td><strong>Due Today</strong></td><td><strong>$400.00</strong></td></tr>
+  </table>
+  <div class="item-group">
+    <div class="item"><div class="item-icon">✅</div><div class="item-text">"Add a donation?" prompt, refund policy checkbox, mailing address captured</div></div>
+    <div class="item"><div class="item-icon">✅</div><div class="item-text">Payment Method: Merchant account active — test group processed payments May 16</div></div>
+  </div>
+
+  <h3>Confirmation Page</h3>
+  <div class="item-group">
+    <div class="item"><div class="item-icon">✅</div><div class="item-text">Merchant: AYSO Region 58, Sherman Oaks, Los Angeles, CA, USA — TAX ID: 95-6205398<div class="detail">Confirmation email to sdavis@davisportal.com. Refund Policy link shown.</div></div></div>
+  </div>
+
+  <h3>Email Configuration</h3>
+  <div class="item-group">
+    <div class="item"><div class="item-icon">✅</div><div class="item-text">Registration Confirmation (Standard) + Waitlist Confirmation (Standard)</div></div>
+    <div class="item"><div class="item-icon">✅</div><div class="item-text">Variables: $$PlayerName$$, $$ProgramName$$, $$PackageName$$</div></div>
+  </div>
+
+  <h3>Where to Find Registration Data (confirmed May 16–17)</h3>
+  <table>
+    <tr><th>Data</th><th>Path</th></tr>
+    <tr><td>Division enrollment breakdown</td><td>Programs → 2026 Fall Core (each package shows player count)</td></tr>
+    <tr><td>Individual player responses</td><td>Programs → 2026 Fall Core → click player's subscription</td></tr>
+    <tr><td>Bulk registration response export</td><td>Programs → 2026 Fall Core → More Actions → export options (CSV)</td></tr>
+    <tr><td>Volunteer signups from registration</td><td>Programs → 2026 Fall Core → More Actions → Export Volunteer Info</td></tr>
+    <tr><td>Coaching signups</td><td>Leagues → Coaching Requests (also shows Coach Request Link)</td></tr>
+    <tr><td>Parent's copy of all answers</td><td>Confirmation email from noreply@ayso58.playmetrics.com — includes every question response, waivers, volunteer positions</td></tr>
+    <tr><td>Active subscriptions</td><td>Programs → 2026 Fall Core dashboard — count of completed registrations (per player, not per family)</td></tr>
+  </table>
+  <div class="callout callout-blue"><strong>💡 Players vs Leagues</strong>Registered players appear under Programs → Program Players. They do NOT appear under Leagues until assigned to teams — that's the team formation step, covered in the July 1 League Operations webinar. This is expected behavior, not a bug.</div>
+
+  <h2>Known Issues</h2>
+  <div class="item-group">
+    <div class="item"><div class="item-icon">✅</div><div class="item-text"><strong>Package-specific dropdown — resolved</strong><div class="detail">Label changed from "Team Mate and Coach Requests" to "Division". Parents now see "Division" with their division name auto-populated. For 6U/7U/8U the linked team mate and coach request questions appear below. For 10U+ they simply see their division name with no extra questions — clean and intuitive.</div></div></div>
+    <div class="item"><div class="item-icon">⚠️</div><div class="item-text"><strong>Merchant address — PO Box rejected</strong><div class="detail">Kristen confirmed PM won't accept a PO box for the customer service address (same as entity address). Receipt shows physical address "Sherman Oaks, Los Angeles, CA." Need to raise with PM support — Sara wants PO box on parent-facing receipts.</div></div></div>
+    <div class="item"><div class="item-icon">⚠️</div><div class="item-text"><strong>Can't delete questions once registration is open</strong><div class="detail">From Krista's R18 support ticket: once registration is open, player questions can only be hidden, not deleted. Finalize all question structure before go-live. If a question needs to be removed mid-registration, hide it instead.</div></div></div>
+  </div>
+
+  <h2>In Progress <span class="tag tag-progress">Underway</span></h2>
+  <div class="item-group">
+    <div class="item"><div class="item-icon">✅</div><div class="item-text">Program review completed by Heather (April 29) — 5 items flagged, all clarified May 4. Action plan reply sent to Heather May 4 (cc'd both Zendesk addresses to fix threading). Items #1, #2, #5 = Steven + Sara reviewing together. #4 = Steven prepping BC file.</div><div class="item-owner">Steven</div></div>
+    <div class="item"><div class="item-icon">✅</div><div class="item-text">Refund policy updated by Kristen (April 28). PO box issue discovered — raised as Known Issue.</div><div class="item-owner">Sara → Kristen</div></div>
+    <div class="item"><div class="item-icon">✅</div><div class="item-text">Test parent walkthrough completed — all 4 sections + checkout + confirmation verified</div><div class="item-owner">Steven</div></div>
+    <div class="item"><div class="item-icon">✅</div><div class="item-text">CC processing fee + service fee confirmed — Sara confirmed region absorbs, Heather acknowledged</div><div class="item-owner">Sara</div></div>
+    <div class="item"><div class="item-icon">✅</div><div class="item-text">SA data analysis complete (May 4) — evaluated 4 SA reports. playerUpload.xlsx is optimal data source (pre-split names, M/F gender, parent2 data, addresses). Player Photo BC Info is definitive BC source (upload + verification dates).<div class="detail">Media=B from playerApplications debunked — every player had B, making it a default flag not a BC indicator. SC Enrollment Details confirmed 7 players with "No File Uploaded" despite Media=B.</div></div><div class="item-owner">Steven</div></div>
+    <div class="item"><div class="item-icon">✅</div><div class="item-text">Standalone import tool built, tested, published (May 4)<div class="detail">Python tool: SA playerUpload + Player Photo BC Info → PM Player Import CSV. Tested against real data: 1,377 verified / 32 non-verified. Supports --dir batch mode, multi-season merge, flexible filename matching. VS Code project with .exe build pipeline. Published at <a href="https://github.com/sdavis9248/playmetrics-import">github.com/sdavis9248/playmetrics-import</a>.</div></div><div class="item-owner">Steven</div></div>
+  </div>
+
+  <h3>Program Review Action Items (from Heather — all resolved, changes applied May 14)</h3>
+  <div class="item-group">
+    <div class="item"><div class="item-icon">✅</div><div class="item-text"><strong>U19 age classification upgraded</strong> — PM added U19 as an age group.</div></div>
+    <div class="item"><div class="item-icon">✅</div><div class="item-text"><strong>NPF: Attached to all 17 packages</strong> — accounting code 5703.</div><div class="item-owner">Steven + Sara</div></div>
+    <div class="item"><div class="item-icon">✅</div><div class="item-text"><strong>Instructions block: Cleared</strong> — empty block removed.</div><div class="item-owner">Steven + Sara</div></div>
+    <div class="item"><div class="item-icon">✅</div><div class="item-text"><strong>BC question: Conditional removed, upload kept</strong> — "skip verified players" ON. Sara confirmed to Heather May 14.</div><div class="item-owner">Steven + Sara</div></div>
+    <div class="item"><div class="item-icon">✅</div><div class="item-text"><strong>Refund Policy waiver: Removed</strong> — duplicated checkout refund policy. Waivers now 2: Standards of Conduct + Liability Release.</div><div class="item-owner">Steven</div></div>
+    <div class="item"><div class="item-icon">✅</div><div class="item-text"><strong>BC import: 2,334 verified players imported by Heather</strong> — 3 seasons (2023–2025) deduplicated. File sent via AES-256 encrypted ZIP. Non-verified (178 players) imported separately by Steven.<div class="detail">Import tool updated: multi-season merge, 2,512 total unique players. GitHub: <a href="https://github.com/sdavis9248/playmetrics-import">sdavis9248/playmetrics-import</a></div></div><div class="item-owner">Steven → PM</div></div>
+  </div>
+
+  <h2>Heather Q&A <span class="tag tag-done">Resolved</span></h2>
+  <table>
+    <tr><th>#</th><th>Question</th><th>Response</th><th>Status</th></tr>
+    <tr><td>1</td><td>Can we resend invitations?</td><td>"You can resend to any accounts that are not verified… as many times as you want in bulk." Use Players → All Players → Manage Invitations.</td><td><span class="tag tag-done">Answered</span></td></tr>
+    <tr><td>2</td><td>Can we get the unique invitation link per player?</td><td>Links ARE unique per contact (token uses contact_id + cryptographic signature). We can't construct them ourselves, but resend via Manage Invitations handles it.</td><td><span class="tag tag-done">Resolved</span></td></tr>
+    <tr><td>3</td><td>Invitation status per player?</td><td>Players → All Players shows Invitations dashboard: Not Verified (invited, not registered), Not Invited, Delivery Failed (bounced), No Contacts. Manage Invitations button for bulk resend.</td><td><span class="tag tag-done">Answered</span></td></tr>
+    <tr><td>4</td><td>Player export ID = invitation URL?</td><td>No — token uses contact_id (from Player Contacts export), not player_id. Confirmed by decoding test group invitation links.</td><td><span class="tag tag-done">Confirmed</span></td></tr>
+    <tr><td>5</td><td>Enable Mailchimp beta?</td><td>"Enabled"</td><td><span class="tag tag-done">Done</span></td></tr>
+    <tr><td>6</td><td>Gotchas for 178 non-verified import?</td><td>"Nothing special, just need to import them."</td><td><span class="tag tag-done">Clear</span></td></tr>
+    <tr><td>7</td><td>Enable/activate the account?</td><td>Account enabled — test registrations processed May 16.</td><td><span class="tag tag-done">Done</span></td></tr>
+  </table>
+
+  <div class="callout callout-green"><strong>✅ Invitation Tracking — Fully Solved</strong>Players → All Players shows an Invitations dashboard with real-time counts of Not Verified, Not Invited, Delivery Failed, and No Contacts. The "Manage Invitations" button allows bulk resend to anyone who hasn't responded. Combined with the Player Contacts export (which contains the contact_id used in invitation tokens), we can cross-reference and build targeted follow-up lists. Invitation emails are delivered via Mailjet (nvo1.mjt.lu tracking links).</div>
+
+  <h2>Remaining Blockers <span class="tag tag-done">None</span></h2>
+  <div class="item-group">
+    <div class="item"><div class="item-icon">✅</div><div class="item-text">PlayMetrics program review — completed, all 5 items resolved.</div><div class="item-owner">PlayMetrics</div></div>
+    <div class="item"><div class="item-icon">✅</div><div class="item-text">CC processing fee + service fee — region absorbs, confirmed.</div><div class="item-owner">PlayMetrics</div></div>
+    <div class="item"><div class="item-icon">✅</div><div class="item-text">Merchant account activation — active, test group payments processed.</div><div class="item-owner">PlayMetrics</div></div>
+    <div class="item"><div class="item-icon">✅</div><div class="item-text">BC question + import — both resolved and executed.</div><div class="item-owner">PlayMetrics</div></div>
+    <div class="item"><div class="item-icon">⚠️</div><div class="item-text">PO box for customer service address — PM rejects it. Low priority.</div><div class="item-owner">PlayMetrics</div></div>
+  </div>
+
+  <h2>Kristen's Tasks <span class="tag tag-waiting">In Progress</span></h2>
+  <div class="item-group">
+    <div class="item"><div class="item-icon">✅</div><div class="item-text">Refund policy text updated in Merchant Account<div class="detail">Completed April 28. Used Sara's original text with July 15, 2026 specific date. $30 non-refundable fee, email to registrar@ayso58.org.</div></div><div class="item-owner">Kristen</div></div>
+    <div class="item"><div class="item-icon">⚠️</div><div class="item-text">PO Box rejected for customer service address — PM won't accept it<div class="detail">Kristen reports PM requires a physical address for the customer service field too (same as entity address). Receipt currently shows physical address, not PO box. Need to raise with PM support — Sara wants PO box on receipts.</div></div><div class="item-owner">Kristen / Steven</div></div>
+    <div class="item"><div class="item-icon">☐</div><div class="item-text">Verify tax ID (showing 95-6205398) and set payout frequency</div><div class="item-owner">Kristen</div></div>
+  </div>
+
+  <h2>Pre-Launch Steps <span class="tag tag-done">Complete</span></h2>
+  <div class="callout callout-green"><strong>✅ Import → Invite → Register flow confirmed</strong>Test group proved the full cycle: imported players received unique Sign Up links, clicked through, created passwords, and pre-loaded data was waiting. Parents completed remaining questions and registered. Full confirmation emails received with all responses.</div>
+  <div class="item-group">
+    <div class="item"><div class="item-icon">✅</div><div class="item-text">NPF attached to all 17 packages — accounting code 5703</div></div>
+    <div class="item"><div class="item-icon">✅</div><div class="item-text">Instructions block cleared</div></div>
+    <div class="item"><div class="item-icon">✅</div><div class="item-text">Refund Policy waiver removed from player questions</div></div>
+    <div class="item"><div class="item-icon">✅</div><div class="item-text">Conditional BC question removed, BC upload kept with skip-verified ON</div></div>
+    <div class="item"><div class="item-icon">✅</div><div class="item-text">BC-verified player CSV sent to PM — 2,334 players imported by Heather</div></div>
+    <div class="item"><div class="item-icon">✅</div><div class="item-text">Account enabled — merchant active, test registrations processed</div></div>
+    <div class="item"><div class="item-icon">✅</div><div class="item-text">Test group: 4 families, 8 players registered successfully (May 16)</div></div>
+    <div class="item"><div class="item-icon">✅</div><div class="item-text">Sara drafted heads-up email for imported families — tested with board group</div></div>
+    <div class="item"><div class="item-icon">✅</div><div class="item-text">Volunteer positions toggle added to confirmation email template by Sara</div></div>
+    <div class="item"><div class="item-icon">✅</div><div class="item-text">"None" option added to soccer experience question (bug fix from test group)</div></div>
+    <div class="item"><div class="item-icon">✅</div><div class="item-text">Import 178 non-verified players — completed May 18</div></div>
+    <div class="item"><div class="item-icon">✅</div><div class="item-text">Import new SC accounts (created on/after 04/01/2025, never enrolled) — completed May 18</div></div>
+  </div>
+
+  <h2>Go-Live Steps <span class="tag tag-progress">Ready to Execute</span></h2>
+  <div class="item-group">
+    <div class="item"><div class="item-icon">☐</div><div class="item-text">Send Track 1 heads-up email to all imported families via Gmail mail merge from commissioner@ayso58.org</div><div class="item-owner">Sara + Steven</div></div>
+    <div class="item"><div class="item-icon">☐</div><div class="item-text">Trigger PM invitation emails (24-48 hrs after Track 1) from Players screen</div><div class="item-owner">Sara / Steven</div></div>
+    <div class="item"><div class="item-icon">☐</div><div class="item-text">SC "Register Now" button redirect to PM + hide SC login button</div><div class="item-owner">Sara → PM</div></div>
+    <div class="item"><div class="item-icon">☐</div><div class="item-text">Send Track 2 SC email blast to non-imported families (Fall Email Template ready)</div><div class="item-owner">Steven</div></div>
+    <div class="item"><div class="item-icon">☐</div><div class="item-text">Upload rotator banner + announcement to SC website</div><div class="item-owner">Steven</div></div>
+    <div class="item"><div class="item-icon">☐</div><div class="item-text">Post to Region 58 social media</div><div class="item-owner">Sara</div></div>
+    <div class="item"><div class="item-icon">☐</div><div class="item-text">Email tournament teams</div><div class="item-owner">Sara</div></div>
+  </div>
+
+  <h2>Post-Launch <span class="tag tag-later">Later</span></h2>
+  <h3>Volunteer Compliance</h3>
+  <div class="item-group">
+    <div class="item"><div class="item-icon">☐</div><div class="item-text">Add "Volunteer" level, enable Co-Ed Teams, update Team Staff Titles</div></div>
+    <div class="item"><div class="item-icon">☐</div><div class="item-text">Import hidden Volunteer container teams, hide visibility</div></div>
+    <div class="item"><div class="item-icon">☐</div><div class="item-text">Export volunteer data → import as Team Staff</div></div>
+    <div class="item"><div class="item-icon">☐</div><div class="item-text">New volunteers without SC accounts → add directly in Sports Affinity to get AYSO ID and enter compliance pipeline<div class="detail">Closes the "new volunteer gap" — no need to wait for PM Governing System. Confirm exact SA admin steps with Jay.</div></div><div class="item-owner">Jay</div></div>
+    <div class="item"><div class="item-icon">☐</div><div class="item-text">Import to Governing System when access granted (summer 2026 — July 9 webinar expected to cover)</div></div>
+    <div class="item"><div class="item-icon">☐</div><div class="item-text">Organize R58 Fingerprint Fair — early August (Jay coordinating, Sara to combine with coach meetings/training)</div><div class="item-owner">Jay</div></div>
+    <div class="item"><div class="item-icon">☐</div><div class="item-text">Play-up request Google Form — structured intake for parents requesting child play up (July 31 age cutoff)</div><div class="item-owner">Sara</div></div>
+  </div>
+  <div class="callout callout-amber">
+    <strong>⚠️ Compliance → Scheduling Dependency</strong>
+    Jay's two-step enforcement: (1) BG check + fingerprinting before team assignment, (2) video training before Game 1 (Aug 24). This drives Ben's scheduling timeline. Sequence: Fingerprint fair (early Aug) → compliance verified → teams formed → Ben builds schedule → first games (Sep 19).
+  </div>
+  <div class="callout callout-green"><strong>✅ Existing automation + SA workaround covers the gap</strong>Sports Affinity / ETrainU compliance automation continues for all volunteers. New volunteers without SC accounts can be added directly in SA. Full details in <a href="Volunteer_Compliance_Guide_Region58.html">Volunteer Compliance Guide</a>.</div>
+
+  <h3>Website (Duda)</h3>
+  <div class="item-group">
+    <div class="item"><div class="item-icon">✅</div><div class="item-text">Sara attended Duda training Zoom (May 14) — drag-and-drop builder</div></div>
+    <div class="item"><div class="item-icon">⚠️</div><div class="item-text">Privacy issue: board member gallery widgets expose personal emails from PM accounts<div class="detail">Sara set her info to private, added commissioner@ as secondary. All board members need to do the same before profiles go on Duda site.</div></div></div>
+    <div class="item"><div class="item-icon">☐</div><div class="item-text">Sara prefers fresh start — streamline, no import from old SC site</div></div>
+    <div class="item"><div class="item-icon">☐</div><div class="item-text">FAQ widget — convert registration info into modern FAQ. AI email agent can identify common questions.</div></div>
+    <div class="item"><div class="item-icon">☐</div><div class="item-text">Confirm with Paula that ayso58.org domain switchover is in Duda rollout plan</div><div class="item-owner">Steven</div></div>
+  </div>
+  <h3>Other</h3>
+  <div class="item-group">
+    <div class="item"><div class="item-icon">☐</div><div class="item-text">Volunteer Sign Up beta — confirm enabled for Region 58 (for non-coaching volunteer signups after registration)</div></div>
+    <div class="item"><div class="item-icon">✅</div><div class="item-text">Mailchimp beta integration enabled by Heather — set up for ongoing season communications</div></div>
+    <div class="item"><div class="item-icon">☐</div><div class="item-text">Archive old test season/league</div></div>
+    <div class="item"><div class="item-icon">☐</div><div class="item-text">Update SportsConnectAutomation modules for PlayMetrics data sources</div></div>
+    <div class="item"><div class="item-icon">☐</div><div class="item-text">Update AI email agent with PlayMetrics knowledge base for registrar@ayso58.org auto-drafts</div></div>
+    <div class="item"><div class="item-icon">☐</div><div class="item-text">Set up Locations & Fields in PM for game scheduling (Ben Hauser) — attend scheduling webinar first</div></div>
+  </div>
+
+  <h2>Quick Reference</h2>
+  <table>
+    <tr><th>Setting</th><th>Verified Value</th></tr>
+    <tr><td>Region</td><td>AYSO Region 58 — Van Nuys/Sherman Oaks</td></tr>
+    <tr><td>Program</td><td>"League 2026 Fall Core" (ID 101848)</td></tr>
+    <tr><td>Season starts</td><td>Sep 19, 2026 (14U−); Aug 16, 2026 (16U/19U)</td></tr>
+    <tr><td>Divisions</td><td>17 packages: 5U coed, 6U–16U gendered, 19U gendered. No 4U.</td></tr>
+    <tr><td>Base price</td><td>$205 flat all divisions</td></tr>
+    <tr><td>NPF</td><td>$25 "AYSO Membership Fee MY2026" per player at checkout</td></tr>
+    <tr><td>Total to parent</td><td>$230; with early bird $200</td></tr>
+    <tr><td>Early bird</td><td>$30 off, currently active</td></tr>
+    <tr><td>Multi-player</td><td>$15 off 3rd+ player</td></tr>
+    <tr><td>Fees</td><td>Region absorbs CC + service fees — confirmed April 29</td></tr>
+    <tr><td>Friend/coach request</td><td>Package-specific: "Division" dropdown, linked questions for 6U/7U/8U only</td></tr>
+    <tr><td>Uniform</td><td>3 fields: size category, jersey, shorts (with "Select..." instruction defaults)</td></tr>
+    <tr><td>Waivers</td><td>2: Standards of Conduct + Liability Release. Refund Policy waiver removed (duplicates checkout). BC conditional question removed (system handles automatically).</td></tr>
+    <tr><td>U19 age classification</td><td>Upgraded by PM — can now use age group selector instead of birth date range workaround</td></tr>
+    <tr><td>Volunteer positions</td><td>5: Head Coach, Asst Coach, Team Manager, Referee, Board Member</td></tr>
+    <tr><td>Refund deadline</td><td>July 15, 2026. $30 non-refundable (includes $25 NPF). Policy text updated in merchant account April 28.</td></tr>
+    <tr><td>Registration target</td><td>Open to public May 18, 2026 (test group launched May 16)</td></tr>
+    <tr><td>TAX ID</td><td>95-6205398</td></tr>
+    <tr><td>Email variables</td><td>$$PlayerName$$, $$ProgramName$$, $$PackageName$$</td></tr>
+    <tr><td>Domain</td><td>ayso58.org — owned by AYSO National, they handle DNS. Stays on SC until Duda website is ready.</td></tr>
+    <tr><td>GitHub — Docs</td><td><a href="https://sdavis9248.github.io/playmetrics-migration-region58/">sdavis9248.github.io/playmetrics-migration-region58</a></td></tr>
+    <tr><td>GitHub — Import Tool</td><td><a href="https://github.com/sdavis9248/playmetrics-import">github.com/sdavis9248/playmetrics-import</a></td></tr>
+  </table>
+
+  <h2>Project Documents</h2>
+  <div class="card">
+    <h4>Generated Guides</h4>
+    <p>Data Import Steps (HTML) — 11-step guide with 8 embedded screenshots (PII-blurred), SA-based workflow</p>
+    <p>PlayMetrics Import Tool (Python) — standalone tool converting SA reports to PM import CSVs. Uses "Player Detail | upload format" + "Player Photo BC Info" reports. Supports <code>--dir</code> batch mode for multi-season auto-load. Published at <a href="https://github.com/sdavis9248/playmetrics-import">github.com/sdavis9248/playmetrics-import</a>. VS Code project with setup.bat/build.bat for .exe distribution.</p>
+    <p>Volunteer Compliance Guide (HTML) — implementation guide for Sara</p>
+    <p>Website Migration Guide (HTML) — SC→PM redirect, comms, embedded AYSO assets</p>
+    <p>Game Scheduling Guide (HTML) — SC→PM scheduling concept map for Ben Hauser</p>
+    <p>Annotated Launch Checklist (DOCX) — checklist with video annotations</p>
+  </div>
+  <div class="card">
+    <h4>Communication Assets (AYSO National)</h4>
+    <p>SC rotator banners (3 themes), email headers, social media graphics, caption template</p>
+    <p><em>All embedded in Website Migration Guide HTML for offline access.</em></p>
+  </div>
+
+  <h2>Region 58 Guides</h2>
+  <table>
+    <tr><th>Guide</th><th>For</th><th>Covers</th></tr>
+    <tr><td><a href="Volunteer_Compliance_Guide_Region58.html">Volunteer Compliance</a></td><td>Jay (CVPA), Sara</td><td>Two-system model, compliance tiers, Jay's enforcement plan, legacy data migration, import workflow, fingerprint fair coordination</td></tr>
+    <tr><td><a href="Game_Scheduling_Guide_Region58.html">Game Scheduling</a></td><td>Ben (Scheduler)</td><td>SC→PM scheduling concept map, field management, auto-matchups, conflict detection, compliance→scheduling dependency</td></tr>
+    <tr><td><a href="Website_Migration_Guide_Region58.html">Website Migration</a></td><td>Steven, Sara</td><td>SC website redirect, rotator banners, email blast, social media — all 10 AYSO assets embedded for download</td></tr>
+    <tr><td><a href="PlayMetrics_Data_Import_Steps.html">Data Import Steps</a></td><td>Steven</td><td>12-step interactive checklist: data cleanup, deduplication, export automation, BC verification, CSV upload — must complete before registration opens</td></tr>
+    <tr><td><a href="AYSO_PlayMetrics_Terminology_Guide.html">Terminology Guide</a></td><td>Everyone</td><td>80+ concepts mapped between AYSO/SportsConnect and PlayMetrics with help center links</td></tr>
+  </table>
+
+  <h2>Reference Links</h2>
+  <div class="ref-links">
+    <a class="ref-link" href="https://help.playmetrics.com/hc/en-us/articles/39138510386199" target="_blank">Launch Checklist</a>
+    <a class="ref-link" href="https://help.playmetrics.com/hc/en-us/articles/39600070246807" target="_blank">Volunteer Compliance</a>
+    <a class="ref-link" href="https://help.playmetrics.com/hc/en-us/articles/12213147157783" target="_blank">Package-Specific Questions</a>
+    <a class="ref-link" href="https://help.playmetrics.com/hc/en-us/articles/4411787074071" target="_blank">Merchant Account</a>
+    <a class="ref-link" href="https://help.playmetrics.com/hc/en-us/articles/360051661633" target="_blank">Registration Link</a>
+    <a class="ref-link" href="https://help.playmetrics.com/hc/en-us/articles/39135262325527" target="_blank">Registration Recap Webinar</a>
+    <a class="ref-link" href="https://help.playmetrics.com/hc/en-us/articles/38607116940823" target="_blank">Financial Admin Webinar</a>
+    <a class="ref-link" href="https://help.playmetrics.com/hc/en-us/articles/39429633833495" target="_blank">Volunteer Compliance Webinar</a>
+    <a class="ref-link" href="https://help.playmetrics.com/hc/en-us/articles/38490695741463" target="_blank">Pilot FAQs</a>
+    <a class="ref-link" href="https://docs.google.com/spreadsheets/d/1gAWje1-UGXT2NpbF3lgRgr0puUWxJxYTegiRgu5dIas/" target="_blank">Import Templates</a>
+    <a class="ref-link" href="https://help.playmetrics.com/hc/en-us/articles/38949110029847" target="_blank">Website Management</a>
+    <a class="ref-link" href="https://docs.google.com/document/d/1srywjkFVCmvnMNdawkDE7AjD_I2lR-cDUcIh3hsCwiE" target="_blank">Fall Email Template</a>
+    <a class="ref-link" href="https://www.ayso9697.org/" target="_blank">Region 9697 Example</a>
+    <a class="ref-link" href="https://band.us/@aysoregionmarketing" target="_blank">AYSO Marketing BAND</a>
+    <a class="ref-link" href="https://home.playmetrics.com/clubs/in-house-rec-leagues" target="_blank">PM In-House Rec Leagues</a>
+    <a class="ref-link" href="https://home.playmetrics.com/youth-soccer-field-manager" target="_blank">PM Field Manager</a>
+  </div>
+
+  <footer>Region 58 — Van Nuys/Sherman Oaks, CA &nbsp;|&nbsp; Prepared by Steve Davis, Registrar<br>Sources: Live program builder (101848), test parent walkthrough (April 26), test group launch (May 16), PlayMetrics Help Center, MY2026 webinars, Heather Deist correspondence, Sara/Steven planning sessions (May 14–17), AYSO National assets</footer>
+
+</div>
+</body>
+</html>
